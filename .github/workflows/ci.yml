@@ -14,6 +14,7 @@ permissions:
 
 env:
   CARGO_TERM_COLOR: always
+  CARGO_INCREMENTAL: "0"
 
 jobs:
   rust:
@@ -23,16 +24,6 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
-      - name: Install Linux dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            libwebkit2gtk-4.1-dev \
-            libappindicator3-dev \
-            librsvg2-dev \
-            patchelf \
-            libssl-dev
-
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -40,9 +31,13 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
+          # PRs restore from main; skip the cache-upload wait on every PR.
+          save-if: ${{ github.ref == 'refs/heads/main' }}
 
-      - name: Test workspace
-        run: cargo test --workspace
+      # Skip taurvia-desktop: compiling Tauri needs WebKit GTK and only runs a
+      # Specta bindings export. Bindings are committed; tsc covers the TS side.
+      - name: Test crates
+        run: cargo test --workspace --locked --exclude taurvia-desktop --lib
 
   frontend:
     name: Frontend typecheck
