@@ -117,7 +117,7 @@ impl BtcRpc {
         let me = signer.address.to_lowercase();
         Ok(txs
             .into_iter()
-            .take(limit.max(1).min(25))
+            .take(limit.clamp(1, 25))
             .map(|tx| {
                 let incoming: u64 = tx
                     .vout
@@ -265,7 +265,7 @@ impl BtcRpc {
         let send_sats = (amount_btc * SATS_PER_BTC).round() as u64;
         let mut utxos = self.utxos(&signer.address).await?;
         utxos.retain(|u| u.status.confirmed);
-        utxos.sort_by(|a, b| b.value.cmp(&a.value));
+        utxos.sort_by_key(|u| std::cmp::Reverse(u.value));
         let fee_rate = self.fee_rate_sat_vb().await?;
 
         let mut selected = Vec::new();

@@ -34,7 +34,7 @@ pub async fn activity(
     let url = format!(
         "{api}?module=account&action=txlist&address={}&page=1&offset={}&sort=desc",
         signer.address,
-        limit.max(1).min(25)
+        limit.clamp(1, 25)
     );
     let resp: EtherscanResponse = taurvia_chain::http_client()
         .get(url)
