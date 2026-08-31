@@ -47,7 +47,7 @@ impl SolanaRpc {
     pub fn new(rpc_url: Option<&str>) -> Self {
         let url = rpc_url
             .filter(|u| !u.is_empty())
-            .unwrap_or(crate::MANAGED_DEFAULT_RPC_URL)
+            .unwrap_or(models::MANAGED_DEFAULT_RPC_URL)
             .to_string();
         let client = Arc::new(RpcClient::new_with_timeout_and_commitment(
             url,
@@ -61,7 +61,7 @@ impl SolanaRpc {
         self.client.as_ref()
     }
 
-    pub async fn get_balance(&self, pubkey: &Pubkey) -> Result<u64> {
+    async fn get_balance(&self, pubkey: &Pubkey) -> Result<u64> {
         self.client
             .get_balance(pubkey)
             .await
@@ -73,7 +73,7 @@ impl SolanaRpc {
         Ok((sol?, tokens?))
     }
 
-    pub async fn get_token_balances(&self, owner: &Pubkey) -> Result<Vec<TokenBalance>> {
+    async fn get_token_balances(&self, owner: &Pubkey) -> Result<Vec<TokenBalance>> {
         let accounts = self
             .client
             .get_token_accounts_by_owner(
@@ -181,24 +181,22 @@ impl SolanaRpc {
     ) -> Result<SendPreview> {
         let mint_pubkey = Pubkey::from_str(mint).context("invalid mint address")?;
         let to_pubkey = Pubkey::from_str(to).context("invalid recipient address")?;
-        let decimals = self
-            .mint_decimals(&mint_pubkey)
-            .await
-            .context("failed to fetch mint decimals")?;
-        let raw_amount = (amount * 10f64.powi(decimals as i32)).round() as u64;
         let destination_ata = get_associated_token_address(&to_pubkey, &mint_pubkey);
-        let creates_token_account = !self.account_exists(&destination_ata).await?;
-        let blockhash = self
-            .client
-            .get_latest_blockhash()
-            .await
-            .context("failed to fetch latest blockhash")?;
-        let tx = build_spl_transfer(from, &mint_pubkey, &to_pubkey, raw_amount, blockhash)?;
-        let fee = self.estimate_fee(&tx).await?;
-        let token_symbol = crate::resolve_mint(mint)
-            .await
+        let (decimals, exists, token_info, blockhash) = tokio::join!(
+            self.mint_decimals(&mint_pubkey),
+            self.account_exists(&destination_ata),
+            crate::resolve_mint(mint),
+            self.client.get_latest_blockhash()
+        );
+        let decimals = decimals.context("failed to fetch mint decimals")?;
+        let creates_token_account = !exists?;
+        let token_symbol = token_info
             .map(|info| info.symbol)
             .unwrap_or_else(|_| shorten_mint(mint));
+        let blockhash = blockhash.context("failed to fetch latest blockhash")?;
+        let raw_amount = (amount * 10f64.powi(decimals as i32)).round() as u64;
+        let tx = build_spl_transfer(from, &mint_pubkey, &to_pubkey, raw_amount, blockhash)?;
+        let fee = self.estimate_fee(&tx).await?;
         Ok(SendPreview {
             from: from.pubkey().to_string(),
             to: to_pubkey.to_string(),

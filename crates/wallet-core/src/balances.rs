@@ -51,16 +51,16 @@ impl WalletService {
         let url = self.evm_rpc_url.lock().unwrap().clone();
         let desc = *self.active_descriptor();
         let rpc = taurvia_evm::EvmRpc::new(&url, desc);
-        let signer = self.with_session(|k| k.evm.clone())?;
-        rpc.snapshot(&signer).await.map_err(WalletError::Operation)
+        let address = self.with_session(|k| k.evm.address.clone())?;
+        rpc.snapshot(&address).await.map_err(WalletError::Operation)
     }
 
     async fn bitcoin_snapshot(&self) -> Result<WalletSnapshot, WalletError> {
         let url = self.btc_esplora.lock().unwrap().clone();
         let desc = *self.active_descriptor();
         let rpc = taurvia_bitcoin::BtcRpc::new(&url, desc);
-        let signer = self.with_session(|k| k.btc(desc.is_testnet).clone())?;
-        rpc.snapshot(&signer).await.map_err(WalletError::Operation)
+        let address = self.with_session(|k| k.btc(desc.is_testnet).address.clone())?;
+        rpc.snapshot(&address).await.map_err(WalletError::Operation)
     }
 
     async fn solana_snapshot(&self) -> Result<WalletSnapshot, WalletError> {
@@ -74,27 +74,20 @@ impl WalletService {
             .map_err(WalletError::Operation)?;
 
         apply_local_metadata(&mut tokens);
-        let mints: Vec<String> = tokens.iter().map(|token| token.mint.clone()).collect();
-        let sol_mint = WRAPPED_SOL_MINT.to_string();
+        let mut mints: Vec<String> = tokens.iter().map(|token| token.mint.clone()).collect();
+        if !mints.iter().any(|mint| mint == WRAPPED_SOL_MINT) {
+            mints.push(WRAPPED_SOL_MINT.to_string());
+        }
         let enrichment = tokio::time::timeout(MARKET_DATA_BUDGET, async {
-            tokio::join!(
-                get_metadata(&mints),
-                get_prices(&mints),
-                get_prices(std::slice::from_ref(&sol_mint)),
-            )
+            tokio::join!(get_metadata(&mints), get_prices(&mints))
         })
         .await;
 
         let mut native_price_usd = None;
-        if let Ok((metadata, prices, sol_prices)) = enrichment {
-            apply_remote_enrichment(
-                &mut tokens,
-                metadata.unwrap_or_default(),
-                prices.unwrap_or_default(),
-            );
-            native_price_usd = sol_prices
-                .ok()
-                .and_then(|prices| prices.get(WRAPPED_SOL_MINT).copied());
+        if let Ok((metadata, prices)) = enrichment {
+            let prices = prices.unwrap_or_default();
+            native_price_usd = prices.get(WRAPPED_SOL_MINT).copied();
+            apply_remote_enrichment(&mut tokens, metadata.unwrap_or_default(), prices);
         }
 
         let native_balance = lamports_to_sol(lamports);
@@ -116,16 +109,6 @@ impl WalletService {
         })
     }
 
-    pub async fn get_sol_balance(&self) -> Result<f64, WalletError> {
-        let snapshot = self.get_snapshot().await?;
-        snapshot.native_balance.ok_or(WalletError::Locked)
-    }
-
-    pub async fn get_token_balances(&self) -> Result<Vec<TokenBalance>, WalletError> {
-        let snapshot = self.get_snapshot().await?;
-        Ok(snapshot.tokens.unwrap_or_default())
-    }
-
     pub async fn get_activity(&self, limit: usize) -> Result<Vec<ActivityItem>, WalletError> {
         let desc = self.active_descriptor();
         match desc.family {
@@ -137,16 +120,16 @@ impl WalletService {
                     .map_err(WalletError::Operation)
             }
             ChainFamily::Evm => {
-                let signer = self.with_session(|k| k.evm.clone())?;
-                taurvia_evm::activity(*desc, &signer, limit)
+                let address = self.with_session(|k| k.evm.address.clone())?;
+                taurvia_evm::activity(*desc, &address, limit)
                     .await
                     .map_err(WalletError::Operation)
             }
             ChainFamily::Bitcoin => {
                 let url = self.btc_esplora.lock().unwrap().clone();
                 let rpc = taurvia_bitcoin::BtcRpc::new(&url, *desc);
-                let signer = self.with_session(|k| k.btc(desc.is_testnet).clone())?;
-                rpc.activity(&signer, limit)
+                let address = self.with_session(|k| k.btc(desc.is_testnet).address.clone())?;
+                rpc.activity(&address, limit)
                     .await
                     .map_err(WalletError::Operation)
             }

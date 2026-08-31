@@ -297,13 +297,3 @@ fn urlencoding_encode(value: &str) -> String {
     }
     out
 }
-
-pub fn curated_major_mints() -> Vec<&'static str> {
-    vec![
-        WRAPPED_SOL_MINT,
-        "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v", // USDC
-        "Es9vMFrzaCERmJfrF4H2FYD4KCoNkY11McCe8BenwNYB", // USDT
-        "JUPyiwrYJFskUPiHa7hkeR8VUtAeFoSYbKedZNsDvCN",  // JUP
-        "DezXAZ8z7PnrnRJjz3wXBoRgixCa6xjnB7YaB1pPB263", // BONK
-    ]
-}

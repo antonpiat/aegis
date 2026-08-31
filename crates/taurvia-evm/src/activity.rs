@@ -2,7 +2,6 @@ use anyhow::{Context, Result};
 use models::{ActivityItem, NetworkDescriptor};
 use serde::Deserialize;
 
-use crate::derive::EvmSigner;
 use crate::tokens::u256_to_f64;
 use alloy::primitives::U256;
 
@@ -25,7 +24,7 @@ struct EtherscanTx {
 
 pub async fn activity(
     descriptor: NetworkDescriptor,
-    signer: &EvmSigner,
+    address: &str,
     limit: usize,
 ) -> Result<Vec<ActivityItem>> {
     let Some(api) = descriptor.explorer_api else {
@@ -33,7 +32,7 @@ pub async fn activity(
     };
     let url = format!(
         "{api}?module=account&action=txlist&address={}&page=1&offset={}&sort=desc",
-        signer.address,
+        address,
         limit.clamp(1, 25)
     );
     let resp: EtherscanResponse = taurvia_chain::http_client()
@@ -48,7 +47,7 @@ pub async fn activity(
         return Ok(Vec::new());
     }
     let txs: Vec<EtherscanTx> = serde_json::from_value(resp.result).unwrap_or_default();
-    let me = signer.address.to_lowercase();
+    let me = address.to_lowercase();
     Ok(txs
         .into_iter()
         .map(|tx| {

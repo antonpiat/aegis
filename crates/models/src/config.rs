@@ -9,9 +9,6 @@ use crate::{
 /// Public / product default Solana mainnet RPC (no user setup required).
 pub const MANAGED_DEFAULT_RPC_URL: &str = "https://api.mainnet-beta.solana.com";
 
-/// Public Solana devnet RPC used when network is Devnet.
-pub const MANAGED_DEVNET_RPC_URL: &str = "https://api.devnet.solana.com";
-
 pub const DEFAULT_AUTO_LOCK_MINUTES: u32 = 5;
 pub const DEFAULT_SLIPPAGE_BPS: u16 = 50;
 

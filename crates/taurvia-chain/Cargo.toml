@@ -10,6 +10,3 @@ anyhow.workspace = true
 reqwest.workspace = true
 moka.workspace = true
 serde.workspace = true
-serde_json.workspace = true
-tokio.workspace = true
-thiserror.workspace = true

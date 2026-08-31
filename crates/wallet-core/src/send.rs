@@ -26,16 +26,16 @@ impl WalletService {
             ChainFamily::Evm => {
                 let url = self.evm_rpc_url.lock().unwrap().clone();
                 let rpc = taurvia_evm::EvmRpc::new(&url, *desc);
-                let signer = self.with_session(|k| k.evm.clone())?;
-                rpc.preview_send(&signer, to, amount, asset)
+                let from = self.with_session(|k| k.evm.address.clone())?;
+                rpc.preview_send(&from, to, amount, asset)
                     .await
                     .map_err(WalletError::Operation)
             }
             ChainFamily::Bitcoin => {
                 let url = self.btc_esplora.lock().unwrap().clone();
                 let rpc = taurvia_bitcoin::BtcRpc::new(&url, *desc);
-                let signer = self.with_session(|k| k.btc(desc.is_testnet).clone())?;
-                rpc.preview_send(&signer, to, amount)
+                let from = self.with_session(|k| k.btc(desc.is_testnet).address.clone())?;
+                rpc.preview_send(&from, to, amount)
                     .await
                     .map_err(WalletError::Operation)
             }
@@ -88,13 +88,11 @@ impl WalletService {
         }
     }
 
-    pub async fn preview_sol_send(
+    pub(crate) async fn preview_sol_send(
         &self,
         to: &str,
         amount_sol: f64,
     ) -> Result<SendPreview, WalletError> {
-        taurvia_chain::validate_recipient(ChainFamily::Solana, to)
-            .map_err(WalletError::Operation)?;
         let keypair = self.signing_keypair()?;
         let mut preview = self
             .rpc_handle()
@@ -105,14 +103,12 @@ impl WalletService {
         Ok(preview)
     }
 
-    pub async fn preview_spl_send(
+    pub(crate) async fn preview_spl_send(
         &self,
         mint: &str,
         to: &str,
         amount: f64,
     ) -> Result<SendPreview, WalletError> {
-        taurvia_chain::validate_recipient(ChainFamily::Solana, to)
-            .map_err(WalletError::Operation)?;
         let keypair = self.signing_keypair()?;
         let mut preview = self
             .rpc_handle()
@@ -123,30 +119,7 @@ impl WalletService {
         Ok(preview)
     }
 
-    pub async fn send_sol(
-        &self,
-        password: &str,
-        to: &str,
-        amount_sol: f64,
-    ) -> Result<SendResult, WalletError> {
-        self.verify_password(password)?;
-        self.send_sol_unlocked(to, amount_sol).await
-    }
-
-    pub async fn send_spl(
-        &self,
-        password: &str,
-        mint: &str,
-        to: &str,
-        amount: f64,
-    ) -> Result<SendResult, WalletError> {
-        self.verify_password(password)?;
-        self.send_spl_unlocked(mint, to, amount).await
-    }
-
     async fn send_sol_unlocked(&self, to: &str, amount_sol: f64) -> Result<SendResult, WalletError> {
-        taurvia_chain::validate_recipient(ChainFamily::Solana, to)
-            .map_err(WalletError::Operation)?;
         let keypair = self.signing_keypair()?;
         self.rpc_handle()
             .send_sol(&keypair, to, amount_sol)
@@ -160,8 +133,6 @@ impl WalletService {
         to: &str,
         amount: f64,
     ) -> Result<SendResult, WalletError> {
-        taurvia_chain::validate_recipient(ChainFamily::Solana, to)
-            .map_err(WalletError::Operation)?;
         let keypair = self.signing_keypair()?;
         self.rpc_handle()
             .send_spl(&keypair, mint, to, amount)

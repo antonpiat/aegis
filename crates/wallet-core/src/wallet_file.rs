@@ -121,18 +121,6 @@ impl WalletService {
         Ok(payload.mnemonic)
     }
 
-    pub fn remove_wallet(&self, password: &str) -> Result<(), WalletError> {
-        let wallet = self
-            .cached_wallet
-            .lock()
-            .unwrap()
-            .clone()
-            .or_else(|| self.storage.load().ok())
-            .ok_or(WalletError::NotFound)?;
-        self.decrypt_payload(&wallet, password)?;
-        self.wipe_local_wallet(&wallet.wallet_id)
-    }
-
     /// Delete the local wallet without the password (forgot-password / factory reset).
     /// Funds are only recoverable via recovery phrase or a portable backup.
     pub fn reset_local_wallet(&self) -> Result<(), WalletError> {

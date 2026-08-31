@@ -44,24 +44,21 @@ impl EvmRpc {
         Ok(ProviderBuilder::new().connect_http(url))
     }
 
-    pub async fn snapshot(&self, signer: &EvmSigner) -> Result<WalletSnapshot> {
-        let address = Address::from_str(&signer.address).context("invalid stored evm address")?;
+    pub async fn snapshot(&self, address: &str) -> Result<WalletSnapshot> {
+        let owner = Address::from_str(address).context("invalid stored evm address")?;
         let provider = self.provider()?;
-        let native = provider
-            .get_balance(address)
-            .await
-            .context("eth_getBalance failed")?;
-        let native_balance = u256_to_f64(native, 18);
-
-        let tokens_fut = self.token_balances_inner(&provider, address);
+        let native_fut = provider.get_balance(owner);
+        let tokens_fut = self.token_balances_inner(provider.clone(), owner);
         let price_id = self.descriptor.coingecko_id.unwrap_or("ethereum");
         let price_fut = taurvia_chain::native_price_usd(price_id);
 
-        let (tokens, price) = tokio::time::timeout(MARKET_DATA_BUDGET, async {
-            tokio::join!(tokens_fut, price_fut)
-        })
-        .await
-        .unwrap_or((Ok(Vec::new()), Err(anyhow!("price timeout"))));
+        let (native, market) = tokio::join!(
+            native_fut,
+            tokio::time::timeout(MARKET_DATA_BUDGET, async { tokio::join!(tokens_fut, price_fut) })
+        );
+        let native = native.context("eth_getBalance failed")?;
+        let native_balance = u256_to_f64(native, 18);
+        let (tokens, price) = market.unwrap_or((Ok(Vec::new()), Err(anyhow!("price timeout"))));
 
         let tokens = tokens.unwrap_or_default();
         let native_price_usd = price.ok();
@@ -72,7 +69,7 @@ impl EvmRpc {
             exists: true,
             unlocked: true,
             network: self.descriptor.id.to_string(),
-            public_key: Some(signer.address.clone()),
+            public_key: Some(address.to_string()),
             native_balance: Some(native_balance),
             native_symbol: self.descriptor.native_symbol.to_string(),
             native_price_usd,
@@ -82,15 +79,9 @@ impl EvmRpc {
         })
     }
 
-    pub async fn token_balances(&self, signer: &EvmSigner) -> Result<Vec<TokenBalance>> {
-        let address = Address::from_str(&signer.address)?;
-        let provider = self.provider()?;
-        self.token_balances_inner(&provider, address).await
-    }
-
     async fn token_balances_inner(
         &self,
-        _provider: &impl Provider,
+        provider: impl Provider + Clone,
         owner: Address,
     ) -> Result<Vec<TokenBalance>> {
         let curated = curated_tokens(self.descriptor.id);
@@ -98,32 +89,29 @@ impl EvmRpc {
             return Ok(Vec::new());
         }
         let contracts: Vec<String> = curated.iter().map(|t| t.address.to_string()).collect();
-        let prices = taurvia_chain::token_prices_usd("ethereum", &contracts)
-            .await
-            .unwrap_or_default();
-
-        let provider_url = self.rpc_url.clone();
-        let results = stream::iter(curated.iter().copied())
-            .map(|token| {
-                let url = provider_url.clone();
-                async move {
-                    let provider = ProviderBuilder::new().connect_http(
-                        url.parse().map_err(|e| anyhow!("{e}"))?,
-                    );
-                    let contract = Address::from_str(token.address)?;
-                    let call = balanceOfCall { account: owner };
-                    let tx = TransactionRequest::default()
-                        .with_to(contract)
-                        .with_input(call.abi_encode());
-                    let bytes = provider.call(tx).await.context("balanceOf")?;
-                    let raw = balanceOfCall::abi_decode_returns(&bytes)
-                        .context("decode balanceOf")?;
-                    Ok::<_, anyhow::Error>((token, raw))
-                }
-            })
-            .buffer_unordered(5)
-            .collect::<Vec<_>>()
-            .await;
+        let prices_fut = taurvia_chain::token_prices_usd("ethereum", &contracts);
+        let balances_fut = async {
+            stream::iter(curated.iter().copied())
+                .map(|token| {
+                    let provider = provider.clone();
+                    async move {
+                        let contract = Address::from_str(token.address)?;
+                        let call = balanceOfCall { account: owner };
+                        let tx = TransactionRequest::default()
+                            .with_to(contract)
+                            .with_input(call.abi_encode());
+                        let bytes = provider.call(tx).await.context("balanceOf")?;
+                        let raw = balanceOfCall::abi_decode_returns(&bytes)
+                            .context("decode balanceOf")?;
+                        Ok::<_, anyhow::Error>((token, raw))
+                    }
+                })
+                .buffer_unordered(5)
+                .collect::<Vec<_>>()
+                .await
+        };
+        let (prices, results) = tokio::join!(prices_fut, balances_fut);
+        let prices = prices.unwrap_or_default();
 
         let mut out = Vec::new();
         for item in results.into_iter().flatten() {
@@ -138,16 +126,16 @@ impl EvmRpc {
 
     pub async fn preview_send(
         &self,
-        signer: &EvmSigner,
+        from: &str,
         to: &str,
         amount: f64,
         asset: Option<&str>,
     ) -> Result<SendPreview> {
         validate_address(to)?;
         let provider = self.provider()?;
-        let from = Address::from_str(&signer.address)?;
+        let from_addr = Address::from_str(from).context("invalid stored evm address")?;
         let to_addr = Address::from_str(to).context("invalid recipient")?;
-        let (token_symbol, tx, decimals) = self.build_tx(from, to_addr, amount, asset)?;
+        let (token_symbol, tx) = self.build_tx(from_addr, to_addr, amount, asset)?;
         let gas = provider
             .estimate_gas(tx.clone())
             .await
@@ -158,9 +146,8 @@ impl EvmRpc {
             .context("eip1559 fees")?;
         let fee_wei = U256::from(gas).saturating_mul(U256::from(fees.max_fee_per_gas));
         let estimated_fee = u256_to_f64(fee_wei, 18);
-        let _ = decimals;
         Ok(SendPreview {
-            from: signer.address.clone(),
+            from: from.to_string(),
             to: to.to_string(),
             token: token_symbol,
             amount: format!("{amount}"),
@@ -189,7 +176,7 @@ impl EvmRpc {
         let provider = ProviderBuilder::new().wallet(wallet).connect_http(url);
         let from = Address::from_str(&signer.address)?;
         let to_addr = Address::from_str(to).context("invalid recipient")?;
-        let (_, mut tx, _) = self.build_tx(from, to_addr, amount, asset)?;
+        let (_, mut tx) = self.build_tx(from, to_addr, amount, asset)?;
         tx.set_chain_id(self.descriptor.eip155_chain_id.unwrap_or(1));
         let pending = provider
             .send_transaction(tx)
@@ -208,7 +195,7 @@ impl EvmRpc {
         to: Address,
         amount: f64,
         asset: Option<&str>,
-    ) -> Result<(String, TransactionRequest, u8)> {
+    ) -> Result<(String, TransactionRequest)> {
         let native = asset
             .map(|a| a.eq_ignore_ascii_case(NATIVE_MINT) || a.eq_ignore_ascii_case("native"))
             .unwrap_or(true)
@@ -219,7 +206,7 @@ impl EvmRpc {
                 .with_from(from)
                 .with_to(to)
                 .with_value(wei);
-            return Ok((self.descriptor.native_symbol.to_string(), tx, 18));
+            return Ok((self.descriptor.native_symbol.to_string(), tx));
         }
         let asset = asset.unwrap();
         let token = curated_tokens(self.descriptor.id)
@@ -233,6 +220,6 @@ impl EvmRpc {
             .with_from(from)
             .with_to(contract)
             .with_input(call.abi_encode());
-        Ok((token.symbol.to_string(), tx, token.decimals))
+        Ok((token.symbol.to_string(), tx))
     }
 }

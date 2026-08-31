@@ -25,6 +25,12 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 - Settings → Network is family-grouped; Advanced RPC is per network id (`rpc_urls`)
 - Send preview always includes network name, full recipient, amount, and fee from Rust
 - Wallet file v2 stores public addresses per family; v1 files upgrade on first unlock
+- Dashboard/activity/preview paths copy addresses only (not signing keys); Bitcoin fee preview no longer builds a signed transaction
+- Hide-balances toggle updates the UI immediately, then persists
+
+### Removed
+
+- Dead IPC that the UI never called: `remove_wallet`, `export_wallet` (in-memory JSON), `get_sol_balance`, `get_token_balances`, `preview_sol_send` / `preview_spl_send`, `send_sol` / `send_spl`. Use `reset_local_wallet`, `export_wallet_to_path`, `get_wallet_snapshot`, `preview_send`, and `send_transfer`
 
 ### Security
 

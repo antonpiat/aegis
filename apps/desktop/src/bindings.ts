@@ -83,14 +83,6 @@ async disableDeviceProtection(password: string) : Promise<Result<WalletFile, Api
     else return { status: "error", error: e  as any };
 }
 },
-async removeWallet(password: string) : Promise<Result<null, ApiError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("remove_wallet", { password }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
 async resetLocalWallet() : Promise<Result<null, ApiError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("reset_local_wallet") };
@@ -102,14 +94,6 @@ async resetLocalWallet() : Promise<Result<null, ApiError>> {
 async changeWalletPassword(oldPassword: string, newPassword: string) : Promise<Result<null, ApiError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_wallet_password", { oldPassword, newPassword }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async exportWallet(password: string) : Promise<Result<string, ApiError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("export_wallet", { password }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -142,22 +126,6 @@ async getWalletSnapshot() : Promise<Result<WalletSnapshot, ApiError>> {
     else return { status: "error", error: e  as any };
 }
 },
-async getSolBalance() : Promise<Result<number, ApiError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("get_sol_balance") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async getTokenBalances() : Promise<Result<TokenBalance[], ApiError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("get_token_balances") };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
 async getActivity(limit: number) : Promise<Result<ActivityItem[], ApiError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_activity", { limit }) };
@@ -177,38 +145,6 @@ async previewSend(to: string, amount: number, asset: string | null) : Promise<Re
 async sendTransfer(password: string, to: string, amount: number, asset: string | null) : Promise<Result<SendResult, ApiError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("send_transfer", { password, to, amount, asset }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async previewSolSend(to: string, amountSol: number) : Promise<Result<SendPreview, ApiError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("preview_sol_send", { to, amountSol }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async previewSplSend(mint: string, to: string, amount: number) : Promise<Result<SendPreview, ApiError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("preview_spl_send", { mint, to, amount }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async sendSol(password: string, to: string, amountSol: number) : Promise<Result<SendResult, ApiError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("send_sol", { password, to, amountSol }) };
-} catch (e) {
-    if(e instanceof Error) throw e;
-    else return { status: "error", error: e  as any };
-}
-},
-async sendSpl(password: string, mint: string, to: string, amount: number) : Promise<Result<SendResult, ApiError>> {
-    try {
-    return { status: "ok", data: await TAURI_INVOKE("send_spl", { password, mint, to, amount }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };

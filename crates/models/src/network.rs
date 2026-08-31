@@ -18,27 +18,6 @@ pub enum ChainFamily {
     Sui,
 }
 
-impl ChainFamily {
-    pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Solana => "solana",
-            Self::Evm => "evm",
-            Self::Bitcoin => "bitcoin",
-            Self::Sui => "sui",
-        }
-    }
-
-    pub fn parse(value: &str) -> Option<Self> {
-        match value.trim() {
-            "solana" => Some(Self::Solana),
-            "evm" | "ethereum" => Some(Self::Evm),
-            "bitcoin" => Some(Self::Bitcoin),
-            "sui" => Some(Self::Sui),
-            _ => None,
-        }
-    }
-}
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Type)]
 pub struct ChainFeatures {
     pub tokens: bool,
@@ -78,14 +57,6 @@ impl NetworkDescriptor {
             features: self.features,
             enabled: self.enabled,
         }
-    }
-
-    pub fn tx_url(self, txid: &str) -> String {
-        self.explorer_tx.replace("{txid}", txid)
-    }
-
-    pub fn address_url(self, address: &str) -> String {
-        self.explorer_address.replace("{address}", address)
     }
 }
 
@@ -310,10 +281,6 @@ pub fn get_network(id: &str) -> Option<&'static NetworkDescriptor> {
 
 pub fn require_network(id: &str) -> &'static NetworkDescriptor {
     get_network(id).unwrap_or(&NETWORKS[0])
-}
-
-pub fn enabled_networks() -> impl Iterator<Item = &'static NetworkDescriptor> {
-    NETWORKS.iter().filter(|n| n.enabled)
 }
 
 pub fn list_network_info(enabled_only: bool) -> Vec<NetworkInfo> {

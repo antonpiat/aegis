@@ -4,12 +4,10 @@ export type {
   ActivityItem,
   ApiError,
   AppSettings,
-  ChainFamily,
   ExplorerKind,
   NetworkInfo,
   RuntimeConfig,
   SendPreview,
-  SendResult,
   SwapQuote,
   TokenBalance,
   TokenInfo,
@@ -51,7 +49,6 @@ export const walletApi = {
     unwrap(commands.enableDeviceProtection(password)),
   disableDeviceProtection: (password: string) =>
     unwrap(commands.disableDeviceProtection(password)),
-  removeWallet: (password: string) => unwrap(commands.removeWallet(password)),
   resetLocalWallet: () => unwrap(commands.resetLocalWallet()),
   changeWalletPassword: (oldPassword: string, newPassword: string) =>
     unwrap(commands.changeWalletPassword(oldPassword, newPassword)),
@@ -65,14 +62,6 @@ export const walletApi = {
     unwrap(commands.previewSend(to, amount, asset)),
   sendTransfer: (password: string, to: string, amount: number, asset: string | null) =>
     unwrap(commands.sendTransfer(password, to, amount, asset)),
-  previewSolSend: (to: string, amountSol: number) =>
-    unwrap(commands.previewSolSend(to, amountSol)),
-  previewSplSend: (mint: string, to: string, amount: number) =>
-    unwrap(commands.previewSplSend(mint, to, amount)),
-  sendSol: (password: string, to: string, amountSol: number) =>
-    unwrap(commands.sendSol(password, to, amountSol)),
-  sendSpl: (password: string, mint: string, to: string, amount: number) =>
-    unwrap(commands.sendSpl(password, mint, to, amount)),
   resolveToken: (mint: string) => unwrap(commands.resolveToken(mint)),
   searchTokens: (query: string) => unwrap(commands.searchTokens(query)),
   previewSwapQuote: (

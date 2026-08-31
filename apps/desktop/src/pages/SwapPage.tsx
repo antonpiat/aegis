@@ -45,7 +45,7 @@ function looksLikeMintSymbol(symbol: string | null | undefined): boolean {
 
 export function SwapPage() {
   const navigate = useNavigate();
-  const { solBalance, tokens, refreshBalances, settings, saveSettings, explorer, network, networkInfo } = useWallet();
+  const { nativeBalance, tokens, refreshBalances, settings, saveSettings, explorer, network, networkInfo } = useWallet();
   const [fromMint, setFromMint] = useState(WRAPPED_SOL);
   const [toMint, setToMint] = useState("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
   const [amount, setAmount] = useState("");
@@ -95,7 +95,7 @@ export function SwapPage() {
     const map = new Map<string, SelectableToken>();
     map.set(WRAPPED_SOL, {
       ...MAJOR_TOKENS[0],
-      balanceUi: solBalance ?? 0,
+      balanceUi: nativeBalance ?? 0,
     });
     for (const token of tokens) {
       map.set(token.mint, withLocalLogo({
@@ -114,7 +114,7 @@ export function SwapPage() {
       if (!map.has(extra.mint)) map.set(extra.mint, withLocalLogo(extra));
     }
     return Array.from(map.values());
-  }, [extraTokens, solBalance, tokens]);
+  }, [extraTokens, nativeBalance, tokens]);
 
   const fromToken = selectable.find((token) => token.mint === fromMint);
   const toToken = selectable.find((token) => token.mint === toMint);
