@@ -6,8 +6,8 @@ Taurvia is a **non-custodial desktop wallet**. Your keys stay on your machine. B
 
 | Version | Supported |
 | ------- | --------- |
-| 0.4.x   | Yes       |
-| < 0.1   | No        |
+| 0.5.x   | Yes       |
+| < 0.5   | No        |
 
 Only the latest release receives security fixes.
 
