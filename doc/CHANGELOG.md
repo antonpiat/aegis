@@ -7,6 +7,27 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+### Added
+
+- Ethereum (Mainnet + Sepolia) and Bitcoin (Mainnet + testnet) behind the same Rust signing core — one seed, family keyring, descriptor registry
+- `list_networks()` data-driven picker; Polygon, Base, and Sui ship as disabled stubs
+- Rust address-family checks (reject `0x` on Solana, `bc1` on Ethereum, and so on)
+- BIP39 / BIP44 / BIP84 derivation tests (Phantom/MetaMask/BIP-0084 vectors)
+
+### Changed
+
+- GitHub Actions: [CI](../.github/workflows/ci.yml) validates every PR and `main` push; [Release](../.github/workflows/release.yml) packages only a `vX.Y.Z` tag after green CI (no more auto-build when `tauri.conf.json` changes)
+- Product copy: **Secure. Simple. On your machine.** Solana remains the swap chain
+- Settings → Network is family-grouped; Advanced RPC is per network id (`rpc_urls`)
+- Send preview always includes network name, full recipient, amount, and fee from Rust
+- Wallet file v2 stores public addresses per family; v1 files upgrade on first unlock
+
+### Security
+
+- Session holds derived family signers only; mnemonic is not kept in RAM; lock drops the keyring
+- EIP-155 `chain_id` comes from the network descriptor, never the UI
+- Swap remains Solana Mainnet-only in Rust (`features.swap` is not enough by itself)
+
 ### Fixed
 
 - Swap token search: restore HTTPS for Jupiter by enabling `reqwest` `rustls` (0.13 drop of TLS features broke remote search)
@@ -273,9 +294,9 @@ When cutting a new version:
 2. Update the version in all workspace `Cargo.toml` packages, `apps/desktop/package.json`, and `apps/desktop/src-tauri/tauri.conf.json`.
 3. Refresh `Cargo.lock` with `cargo check` / `cargo test`.
 4. Update `README.md` version note if present.
-5. Build and test: `cargo test` and `pnpm tauri build`.
-6. Create a GitHub Release tagged `vx.y.z` and attach binaries from `target/release/bundle/`.
-7. Copy the new section into the GitHub Release notes.
+5. Merge to `main` and wait for [CI](../.github/workflows/ci.yml) to pass.
+6. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z` (tag must match `tauri.conf.json`).
+7. [Release](../.github/workflows/release.yml) builds unsigned installers and attaches them to the GitHub Release. Edit the notes if needed.
 
 [Unreleased]: https://github.com/antonpiat/taurvia/compare/v0.4.3...HEAD
 [0.4.3]: https://github.com/antonpiat/taurvia/compare/v0.4.2...v0.4.3

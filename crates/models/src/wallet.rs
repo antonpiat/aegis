@@ -1,45 +1,9 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-pub const WALLET_FILE_VERSION: u32 = 1;
+pub const WALLET_FILE_VERSION: u32 = 2;
+pub const MIN_WALLET_FILE_VERSION: u32 = 1;
 pub const DEFAULT_DERIVATION_PATH: &str = "m/44'/501'/0'/0'";
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
-#[serde(rename_all = "kebab-case")]
-pub enum Network {
-    #[default]
-    SolanaMainnet,
-    SolanaDevnet,
-}
-
-impl Network {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            Self::SolanaMainnet => "solana-mainnet",
-            Self::SolanaDevnet => "solana-devnet",
-        }
-    }
-
-    /// Parse wallet-file / settings id. Unknown values → mainnet.
-    pub fn parse(value: &str) -> Self {
-        match value.trim() {
-            "solana-devnet" | "devnet" => Self::SolanaDevnet,
-            _ => Self::SolanaMainnet,
-        }
-    }
-
-    pub fn is_mainnet(self) -> bool {
-        matches!(self, Self::SolanaMainnet)
-    }
-}
-
-impl std::str::FromStr for Network {
-    type Err = std::convert::Infallible;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(Self::parse(s))
-    }
-}
 
 /// How the wallet ciphertext is keyed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -75,6 +39,39 @@ pub struct EncryptedPayload {
     pub derivation_path: String,
 }
 
+/// Public addresses keyed by family. Secrets are never stored here.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, Type)]
+pub struct WalletAddresses {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub solana: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evm: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub bitcoin: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sui: Option<String>,
+}
+
+impl WalletAddresses {
+    pub fn get(&self, family: crate::ChainFamily) -> Option<&str> {
+        match family {
+            crate::ChainFamily::Solana => self.solana.as_deref(),
+            crate::ChainFamily::Evm => self.evm.as_deref(),
+            crate::ChainFamily::Bitcoin => self.bitcoin.as_deref(),
+            crate::ChainFamily::Sui => self.sui.as_deref(),
+        }
+    }
+
+    pub fn set(&mut self, family: crate::ChainFamily, address: String) {
+        match family {
+            crate::ChainFamily::Solana => self.solana = Some(address),
+            crate::ChainFamily::Evm => self.evm = Some(address),
+            crate::ChainFamily::Bitcoin => self.bitcoin = Some(address),
+            crate::ChainFamily::Sui => self.sui = Some(address),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct WalletFile {
     pub version: u32,
@@ -85,5 +82,8 @@ pub struct WalletFile {
     /// Absent in older files → password-only.
     #[serde(default)]
     pub protection: WalletProtection,
+    /// Public family addresses. Missing on v1 files.
+    #[serde(default)]
+    pub addresses: WalletAddresses,
     pub crypto: CryptoEnvelope,
 }

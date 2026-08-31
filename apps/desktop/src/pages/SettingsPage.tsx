@@ -29,8 +29,10 @@ import {
 import { DEFAULT_AUTO_LOCK_MINUTES, normalizeAutoLockMinutes } from "@/lib/autoLock";
 import { explorerLabel, normalizeExplorer } from "@/lib/explorer";
 import {
+  enabledNetworks,
+  familyLabel,
   networkShortLabel,
-  toNetwork,
+  normalizeNetworkId,
 } from "@/lib/network";
 import { isPasswordStrong, passwordStrengthError } from "@/lib/password";
 import {
@@ -40,7 +42,7 @@ import {
   type SettingsSectionId,
 } from "@/lib/settingsNav";
 import { withLocalLogo } from "@/lib/tokenCatalog";
-import { ApiError, AppSettings, ExplorerKind, Network, walletApi } from "@/lib/tauri";
+import { ApiError, AppSettings, ExplorerKind, walletApi } from "@/lib/tauri";
 import { shortenAddress } from "@/lib/utils";
 
 const APP_VIEW_OPTIONS: Array<{
@@ -84,40 +86,33 @@ const AUTO_LOCK_OPTIONS: Array<{
   { value: "60", label: "60 minutes", description: "Lock after 60 minutes idle", minutes: 60 },
 ];
 
-const NETWORK_OPTIONS: Array<{
-  value: Network;
-  label: string;
-  description: string;
-}> = [
-  {
-    value: "solana-mainnet",
-    label: "Mainnet",
-    description: "Real funds · Swap available",
-  },
-  {
-    value: "solana-devnet",
-    label: "Devnet",
-    description: "Test cluster · not real funds · Swap disabled",
-  },
-];
-
 const SECTION_COPY: Record<SettingsSectionId, string> = {
   view: "Layout and window size. Manual sizes are kept across restarts.",
   wallet: "Session preferences and tokens you added for Swap.",
   security: "Protect access to your wallet on this device.",
-  transactions: "Swap slippage and Solana explorer links.",
-  network: "Active cluster and RPC endpoint.",
-  advanced: "Optional RPC and Jupiter overrides.",
+  transactions: "Swap slippage and explorer links.",
+  network: "Active network and RPC endpoint.",
+  advanced: "Optional RPC overrides.",
   danger: "Remove this wallet from the device.",
 };
 
 type OpenMenu = "app-view" | "auto-lock" | "explorer" | "network" | null;
 
+function rpcOverrideFor(settings: AppSettings, networkId: string): string {
+  const id = normalizeNetworkId(networkId);
+  const mapped = settings.rpc_urls?.[id];
+  if (typeof mapped === "string" && mapped.trim()) return mapped.trim();
+  if (id.startsWith("solana") && settings.rpc_url?.trim()) {
+    return settings.rpc_url.trim();
+  }
+  return "";
+}
+
 export function SettingsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { section: sectionParam } = useParams<{ section: string }>();
-  const { refresh, refreshBalances, settings, saveSettings, network, changeNetwork } =
+  const { refresh, refreshBalances, settings, saveSettings, network, changeNetwork, networks, networkInfo } =
     useWallet();
   const layout = useLayoutMode();
   const [seedOpen, setSeedOpen] = useState(false);
@@ -229,22 +224,22 @@ export function SettingsPage() {
   }, [toast]);
 
   useEffect(() => {
-    setRpcUrl(settings.rpc_url ?? "");
+    setRpcUrl(rpcOverrideFor(settings, network));
     setJupiterKey(settings.jupiter_api_key ?? "");
     setSlippageInput(((settings.default_slippage_bps ?? 50) / 100).toString());
-  }, [settings.rpc_url, settings.jupiter_api_key, settings.default_slippage_bps]);
+  }, [settings, network]);
 
   useEffect(() => {
     void (async () => {
       try {
-        const defaultUrl = await walletApi.getManagedDefaultRpcUrl(toNetwork(network));
+        const defaultUrl = await walletApi.getManagedDefaultRpcUrl(normalizeNetworkId(network));
         setManagedDefault(defaultUrl);
-        setActiveRpc(settings.rpc_url?.trim() || defaultUrl);
+        setActiveRpc(rpcOverrideFor(settings, network) || defaultUrl);
       } catch {
         // ignore initial load errors
       }
     })();
-  }, [settings.rpc_url, network]);
+  }, [settings, network]);
 
   const patchSettings = async (patch: Partial<AppSettings>) => {
     const next: AppSettings = {
@@ -355,9 +350,18 @@ export function SettingsPage() {
     setSavingConfig(true);
     setConfigError(null);
     try {
+      const trimmed = rpcUrl.trim();
+      const rpcUrls = { ...(settings.rpc_urls ?? {}) };
+      if (trimmed) {
+        rpcUrls[network] = trimmed;
+      } else {
+        delete rpcUrls[network];
+      }
       const next: AppSettings = {
         ...settings,
-        rpc_url: rpcUrl.trim() ? rpcUrl.trim() : null,
+        rpc_url:
+          networkInfo?.family === "solana" ? (trimmed ? trimmed : null) : settings.rpc_url,
+        rpc_urls: rpcUrls,
         jupiter_api_key: jupiterKey.trim() ? jupiterKey.trim() : null,
       };
       const runtime = await saveSettings(next);
@@ -380,9 +384,12 @@ export function SettingsPage() {
     setSavingConfig(true);
     setConfigError(null);
     try {
+      const rpcUrls = { ...(settings.rpc_urls ?? {}) };
+      delete rpcUrls[network];
       const next: AppSettings = {
         ...settings,
-        rpc_url: null,
+        rpc_url: networkInfo?.family === "solana" ? null : settings.rpc_url,
+        rpc_urls: rpcUrls,
         jupiter_api_key: null,
       };
       const runtime = await saveSettings(next);
@@ -400,21 +407,20 @@ export function SettingsPage() {
     }
   };
 
-  const handleNetworkSwitch = async (next: Network) => {
-    if (next === toNetwork(network) || switchingNetwork) return;
+  const handleNetworkSwitch = async (next: string) => {
+    if (next === normalizeNetworkId(network) || switchingNetwork) return;
     setSwitchingNetwork(true);
     setNetworkError(null);
     try {
       const runtime = await changeNetwork(next);
       setActiveRpc(runtime.rpc_url);
       setRpcUrl("");
-      // Override is cleared on switch; resolved RPC is the managed default.
       setManagedDefault(runtime.rpc_url);
+      const info = networks.find((n) => n.id === next);
       setToast({
-        message:
-          next === "solana-devnet"
-            ? "Switched to Devnet. Swap is disabled on this cluster."
-            : "Switched to Mainnet.",
+        message: info
+          ? `Switched to ${info.name}.${info.features.swap ? "" : " Swap is unavailable on this network."}`
+          : `Switched to ${next}.`,
         tone: "success",
       });
     } catch (err) {
@@ -716,36 +722,45 @@ export function SettingsPage() {
         {section === "transactions" && (
           <Card>
             <CardContent className="space-y-4 pt-6">
-              <div className="space-y-2">
-                <Label htmlFor="default-slippage">Default slippage (%)</Label>
-                <Input
-                  id="default-slippage"
-                  value={slippageInput}
-                  onChange={(e) => setSlippageInput(e.target.value)}
-                  onBlur={() => void handleSlippageBlur()}
-                  inputMode="decimal"
-                />
-              </div>
-              <SelectDropdown
-                label="Block explorer"
-                value={explorerValue}
-                options={[
-                  {
-                    value: "solscan" as ExplorerKind,
-                    label: explorerLabel("solscan"),
-                    description: "Open transaction links on Solscan",
-                  },
-                  {
-                    value: "solanaExplorer" as ExplorerKind,
-                    label: explorerLabel("solanaExplorer"),
-                    description: "Open transaction links on Solana Explorer",
-                  },
-                ]}
-                open={openMenu === "explorer"}
-                disabled={savingPrefs}
-                onOpenChange={(open) => setOpenMenu(open ? "explorer" : null)}
-                onChange={(next) => void patchSettings({ explorer: next })}
-              />
+              {networkInfo?.family === "solana" ? (
+                <>
+                  <div className="space-y-2">
+                    <Label htmlFor="default-slippage">Default slippage (%)</Label>
+                    <Input
+                      id="default-slippage"
+                      value={slippageInput}
+                      onChange={(e) => setSlippageInput(e.target.value)}
+                      onBlur={() => void handleSlippageBlur()}
+                      inputMode="decimal"
+                    />
+                  </div>
+                  <SelectDropdown
+                    label="Block explorer"
+                    value={explorerValue}
+                    options={[
+                      {
+                        value: "solscan" as ExplorerKind,
+                        label: explorerLabel("solscan"),
+                        description: "Open transaction links on Solscan",
+                      },
+                      {
+                        value: "solanaExplorer" as ExplorerKind,
+                        label: explorerLabel("solanaExplorer"),
+                        description: "Open transaction links on Solana Explorer",
+                      },
+                    ]}
+                    open={openMenu === "explorer"}
+                    disabled={savingPrefs}
+                    onOpenChange={(open) => setOpenMenu(open ? "explorer" : null)}
+                    onChange={(next) => void patchSettings({ explorer: next })}
+                  />
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  Explorer links for {networkInfo?.name ?? "this network"} come from the network
+                  descriptor. Swap slippage applies on Solana Mainnet only.
+                </p>
+              )}
             </CardContent>
           </Card>
         )}
@@ -754,9 +769,18 @@ export function SettingsPage() {
           <Card>
             <CardContent className="space-y-4 pt-6">
               <SelectDropdown
-                label="Cluster"
-                value={toNetwork(network)}
-                options={NETWORK_OPTIONS}
+                label="Network"
+                value={normalizeNetworkId(network)}
+                options={enabledNetworks(networks)
+                  .slice()
+                  .sort((a, b) => a.family.localeCompare(b.family) || a.name.localeCompare(b.name))
+                  .map((info) => ({
+                  value: info.id,
+                  label: info.name,
+                  description: `${familyLabel(info.family)}${info.features.swap ? " · Swap" : ""}${
+                    info.is_testnet ? " · testnet" : ""
+                  }`,
+                }))}
                 open={openMenu === "network"}
                 disabled={switchingNetwork}
                 onOpenChange={(open) => setOpenMenu(open ? "network" : null)}
@@ -767,8 +791,8 @@ export function SettingsPage() {
                 <span className="max-w-[60%] truncate font-mono text-xs">{activeRpc || "—"}</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Same address on Mainnet and Devnet. Switching clears a custom Advanced RPC
-                override and uses the managed endpoint for that cluster.
+                Same seed on every network. Switching changes RPC only — no password. Address
+                format is different per family (Solana / Ethereum / Bitcoin).
               </p>
               {networkError && (
                 <Alert className="border-destructive/40 text-destructive">{networkError}</Alert>
@@ -781,7 +805,7 @@ export function SettingsPage() {
           <Card>
             <CardContent className="space-y-4 pt-6">
               <p className="text-xs text-muted-foreground">
-                Default RPC for {networkShortLabel(network)}:{" "}
+                Default RPC for {networkShortLabel(networkInfo, network)}:{" "}
                 {managedDefault || "managed public endpoint"}. Leave fields empty to use
                 Taurvia defaults. Developer <code className="font-mono">.env</code> is
                 local-only and never ships in releases.
@@ -792,22 +816,24 @@ export function SettingsPage() {
                   id="rpc-url"
                   value={rpcUrl}
                   onChange={(e) => setRpcUrl(e.target.value)}
-                  placeholder={managedDefault || "https://api.mainnet-beta.solana.com"}
+                  placeholder={managedDefault || "https://…"}
                   autoComplete="off"
                   spellCheck={false}
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="jupiter-key">Jupiter API key (optional)</Label>
-                <Input
-                  id="jupiter-key"
-                  type="password"
-                  value={jupiterKey}
-                  onChange={(e) => setJupiterKey(e.target.value)}
-                  placeholder="Leave empty for keyless Jupiter"
-                  autoComplete="off"
-                />
-              </div>
+              {networkInfo?.family === "solana" && (
+                <div className="space-y-2">
+                  <Label htmlFor="jupiter-key">Jupiter API key (optional)</Label>
+                  <Input
+                    id="jupiter-key"
+                    type="password"
+                    value={jupiterKey}
+                    onChange={(e) => setJupiterKey(e.target.value)}
+                    placeholder="Leave empty for keyless Jupiter"
+                    autoComplete="off"
+                  />
+                </div>
+              )}
               {configError && (
                 <Alert className="border-destructive/40 text-destructive">{configError}</Alert>
               )}

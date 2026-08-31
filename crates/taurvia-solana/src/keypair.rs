@@ -1,31 +1,28 @@
 use anyhow::{anyhow, Context, Result};
 use base64::{engine::general_purpose::STANDARD as BASE64, Engine};
-use bip39::Mnemonic;
 use models::DEFAULT_DERIVATION_PATH;
 use solana_derivation_path::DerivationPath;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signer::keypair::keypair_from_seed_and_derivation_path;
 
 pub fn generate_mnemonic() -> Result<String> {
-    let mut entropy = [0u8; 16];
-    rand::fill(&mut entropy);
-    let mnemonic = Mnemonic::from_entropy(&entropy).context("failed to generate mnemonic")?;
-    Ok(mnemonic.to_string())
+    taurvia_hd::generate_mnemonic()
 }
 
 pub fn validate_mnemonic(mnemonic: &str) -> Result<()> {
-    Mnemonic::parse(mnemonic)
-        .map(|_| ())
-        .map_err(|_| anyhow!("invalid mnemonic phrase"))
+    taurvia_hd::validate_mnemonic(mnemonic)
+}
+
+pub fn derive_keypair_from_seed(seed: &[u8]) -> Result<Keypair> {
+    let path = DerivationPath::from_absolute_path_str(DEFAULT_DERIVATION_PATH)
+        .map_err(|e| anyhow!("invalid derivation path: {e}"))?;
+    keypair_from_seed_and_derivation_path(seed, Some(path))
+        .map_err(|e| anyhow!("key derivation failed: {e}"))
 }
 
 pub fn derive_keypair_from_mnemonic(mnemonic: &str) -> Result<Keypair> {
-    let mnemonic = Mnemonic::parse(mnemonic).map_err(|_| anyhow!("invalid mnemonic phrase"))?;
-    let seed = mnemonic.to_seed("");
-    let path = DerivationPath::from_absolute_path_str(DEFAULT_DERIVATION_PATH)
-        .map_err(|e| anyhow!("invalid derivation path: {e}"))?;
-    keypair_from_seed_and_derivation_path(&seed, Some(path))
-        .map_err(|e| anyhow!("key derivation failed: {e}"))
+    let seed = taurvia_hd::seed_from_mnemonic(mnemonic)?;
+    derive_keypair_from_seed(seed.as_slice())
 }
 
 pub fn keypair_to_base64(keypair: &Keypair) -> String {
@@ -43,6 +40,19 @@ pub fn keypair_from_base64(encoded: &str) -> Result<Keypair> {
 mod tests {
     use super::*;
     use solana_sdk::signer::Signer;
+
+    #[test]
+    fn phantom_vector_abandon() {
+        // Phantom / Solflare path m/44'/501'/0'/0' (SLIP-0010).
+        let kp = derive_keypair_from_mnemonic(
+            "abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about",
+        )
+        .unwrap();
+        assert_eq!(
+            kp.pubkey().to_string(),
+            "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
+        );
+    }
 
     #[test]
     fn mnemonic_round_trip() {

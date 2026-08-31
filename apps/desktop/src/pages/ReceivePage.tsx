@@ -3,11 +3,12 @@ import { PageHeader } from "@/components/PageHeader";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { useWallet } from "@/context/WalletContext";
+import { receiveWarning } from "@/lib/network";
 import { Copy } from "lucide-react";
 import { useState } from "react";
 
 export function ReceivePage() {
-  const { publicKey } = useWallet();
+  const { publicKey, networkInfo, nativeSymbol } = useWallet();
   const [copied, setCopied] = useState(false);
 
   const handleCopy = async () => {
@@ -21,13 +22,15 @@ export function ReceivePage() {
     <div className="space-y-4 sm:space-y-6">
       <PageHeader
         title="Receive"
-        description="Share your address to receive SOL or SPL tokens."
+        description={`Share your address to receive ${nativeSymbol}${
+          networkInfo?.features.tokens ? " or tokens" : ""
+        }.`}
       />
 
       <Card>
         <CardHeader>
           <CardTitle>Your address</CardTitle>
-          <CardDescription>Only send Solana network assets to this address.</CardDescription>
+          <CardDescription>{receiveWarning(networkInfo)}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center gap-4">
           {publicKey ? (

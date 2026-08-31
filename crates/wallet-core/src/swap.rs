@@ -1,4 +1,4 @@
-use models::{Network, SwapQuote, SwapResult, TokenInfo};
+use models::{SwapQuote, SwapResult, TokenInfo};
 use taurvia_solana::{normalize_mint, resolve_mint, search_tokens, ui_amount_to_raw};
 
 use crate::session::WalletService;
@@ -7,7 +7,8 @@ use crate::WalletError;
 impl WalletService {
     /// Swap is Mainnet-only; enforce in Rust so UI gating cannot be bypassed via IPC.
     fn require_mainnet_for_swap(&self) -> Result<(), WalletError> {
-        if !Network::parse(&self.wallet_network()).is_mainnet() {
+        let desc = self.active_descriptor();
+        if !desc.features.swap || desc.is_testnet {
             return Err(WalletError::Operation(anyhow::anyhow!(
                 "Swap is available on Solana Mainnet only"
             )));

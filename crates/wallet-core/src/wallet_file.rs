@@ -5,27 +5,26 @@ use crypto::{
     KDF_NAME, KEY_LEN, NONCE_LEN,
 };
 use models::{
-    CryptoEnvelope, EncryptedPayload, Network, WalletFile, WalletProtection,
-    DEFAULT_DERIVATION_PATH, WALLET_FILE_VERSION,
+    CryptoEnvelope, EncryptedPayload, WalletAddresses, WalletFile, WalletProtection,
+    DEFAULT_DERIVATION_PATH, MIN_WALLET_FILE_VERSION, WALLET_FILE_VERSION,
 };
 use storage::DeviceSecretError;
 use taurvia_solana::{
-    derive_keypair_from_mnemonic, generate_mnemonic, keypair_from_base64, keypair_to_base64,
-    validate_mnemonic, Keypair, Signer,
+    keypair_from_base64, keypair_to_base64, Keypair, Signer,
 };
 use uuid::Uuid;
 use zeroize::Zeroize;
 
-use crate::session::{WalletService, WalletSession};
+use crate::session::{FamilyKeyring, WalletService, WalletSession};
 use crate::WalletError;
 
 impl WalletService {
     pub fn generate_mnemonic(&self) -> Result<String, WalletError> {
-        generate_mnemonic().map_err(WalletError::Operation)
+        taurvia_hd::generate_mnemonic().map_err(WalletError::Operation)
     }
 
     pub fn validate_mnemonic(&self, mnemonic: &str) -> Result<(), WalletError> {
-        validate_mnemonic(mnemonic).map_err(|_| WalletError::InvalidMnemonic)
+        taurvia_hd::validate_mnemonic(mnemonic).map_err(|_| WalletError::InvalidMnemonic)
     }
 
     pub fn create_wallet(&self, mnemonic: &str, password: &str) -> Result<WalletFile, WalletError> {
@@ -66,19 +65,37 @@ impl WalletService {
     }
 
     pub fn unlock(&self, password: &str) -> Result<String, WalletError> {
-        let wallet = self.storage.load()?;
+        let mut wallet = self.storage.load()?;
         let payload = self.decrypt_payload(&wallet, password)?;
         let keypair = keypair_from_base64(&payload.private_key).map_err(WalletError::Operation)?;
-        let public_key = keypair.pubkey().to_string();
-        // Do not retain mnemonic in session RAM.
+        let keyring = FamilyKeyring::from_solana_and_mnemonic(keypair, &payload.mnemonic)?;
+        let desc = models::require_network(&wallet.network);
+        let public_key = keyring.address(desc.family, desc.is_testnet);
+
+        let mut addresses = wallet.addresses.clone();
+        addresses.set(
+            models::ChainFamily::Solana,
+            keyring.solana.pubkey().to_string(),
+        );
+        addresses.set(models::ChainFamily::Evm, keyring.evm.address.clone());
+        addresses.set(
+            models::ChainFamily::Bitcoin,
+            keyring.bitcoin.address.clone(),
+        );
+        let needs_upgrade = wallet.version < WALLET_FILE_VERSION
+            || wallet.addresses.evm.is_none()
+            || wallet.addresses.bitcoin.is_none();
+        if needs_upgrade {
+            wallet.version = WALLET_FILE_VERSION;
+            wallet.addresses = addresses;
+            self.storage.save(&wallet)?;
+        }
+
         let mut session = self.session.lock().unwrap();
-        *session = Some(WalletSession {
-            public_key: public_key.clone(),
-            keypair,
-        });
+        *session = Some(WalletSession { keyring });
         *self.cached_wallet.lock().unwrap() = Some(wallet.clone());
 
-        let network = Network::parse(&wallet.network);
+        let network = models::normalize_network_id(&wallet.network).to_string();
         let mut settings = self.get_settings();
         if settings.network != network {
             settings.network = network;
@@ -255,15 +272,15 @@ impl WalletService {
         mnemonic: &str,
         password: &str,
     ) -> Result<WalletFile, WalletError> {
-        let keypair =
-            derive_keypair_from_mnemonic(mnemonic).map_err(|_| WalletError::InvalidMnemonic)?;
+        let keyring =
+            FamilyKeyring::from_mnemonic(mnemonic).map_err(|_| WalletError::InvalidMnemonic)?;
         let payload = EncryptedPayload {
             mnemonic: mnemonic.to_string(),
-            private_key: keypair_to_base64(&keypair),
+            private_key: keypair_to_base64(&keyring.solana),
             derivation_path: DEFAULT_DERIVATION_PATH.to_string(),
         };
-        let network = self.get_settings().network;
-        let wallet = self.encrypt_wallet_file(&keypair, &payload, password, network)?;
+        let network = models::normalize_network_id(&self.get_settings().network).to_string();
+        let wallet = self.encrypt_wallet_file(&keyring, &payload, password, &network)?;
         self.storage.save(&wallet)?;
         *self.cached_wallet.lock().unwrap() = Some(wallet.clone());
         Ok(wallet)
@@ -284,19 +301,30 @@ impl WalletService {
 
     fn encrypt_wallet_file(
         &self,
-        keypair: &Keypair,
+        keyring: &FamilyKeyring,
         payload: &EncryptedPayload,
         password: &str,
-        network: Network,
+        network: &str,
     ) -> Result<WalletFile, WalletError> {
+        let mut addresses = WalletAddresses::default();
+        addresses.set(
+            models::ChainFamily::Solana,
+            keyring.solana.pubkey().to_string(),
+        );
+        addresses.set(models::ChainFamily::Evm, keyring.evm.address.clone());
+        addresses.set(
+            models::ChainFamily::Bitcoin,
+            keyring.bitcoin.address.clone(),
+        );
         self.reencrypt_wallet_file(
             &WalletFile {
                 version: WALLET_FILE_VERSION,
                 wallet_id: Uuid::new_v4().to_string(),
-                network: network.as_str().to_string(),
-                public_key: keypair.pubkey().to_string(),
+                network: network.to_string(),
+                public_key: keyring.solana.pubkey().to_string(),
                 created_at: Utc::now().to_rfc3339(),
                 protection: WalletProtection::Password,
+                addresses,
                 crypto: CryptoEnvelope {
                     kdf: KDF_NAME.into(),
                     salt: String::new(),
@@ -305,7 +333,7 @@ impl WalletService {
                     ciphertext: String::new(),
                 },
             },
-            keypair,
+            &keyring.solana,
             payload,
             password,
             WalletProtection::Password,
@@ -339,6 +367,7 @@ impl WalletService {
             public_key: keypair.pubkey().to_string(),
             created_at: existing.created_at.clone(),
             protection,
+            addresses: existing.addresses.clone(),
             crypto: CryptoEnvelope {
                 kdf: KDF_NAME.into(),
                 salt: BASE64.encode(salt),
@@ -375,7 +404,7 @@ impl WalletService {
         wallet: &WalletFile,
         password: &str,
     ) -> Result<EncryptedPayload, WalletError> {
-        if wallet.version != WALLET_FILE_VERSION {
+        if wallet.version < MIN_WALLET_FILE_VERSION || wallet.version > WALLET_FILE_VERSION {
             return Err(WalletError::Operation(anyhow::anyhow!(
                 "unsupported wallet file version: {}",
                 wallet.version

@@ -7,12 +7,14 @@ use crate::TokenBalance;
 pub struct WalletSnapshot {
     pub exists: bool,
     pub unlocked: bool,
-    /// Wallet file network id (e.g. `solana-mainnet`). Empty wallet → default mainnet.
+    /// Active network id (e.g. `solana-mainnet`, `ethereum-mainnet`).
     pub network: String,
+    /// Active-chain receive address (public).
     pub public_key: Option<String>,
-    pub sol_balance: Option<f64>,
-    pub sol_price_usd: Option<f64>,
-    pub sol_value_usd: Option<f64>,
+    pub native_balance: Option<f64>,
+    pub native_symbol: String,
+    pub native_price_usd: Option<f64>,
+    pub native_value_usd: Option<f64>,
     pub total_portfolio_usd: Option<f64>,
     pub tokens: Option<Vec<TokenBalance>>,
 }

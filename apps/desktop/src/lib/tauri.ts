@@ -1,13 +1,15 @@
 import { commands } from "@/bindings";
-import type { AppSettings, Network, Result } from "@/bindings";
+import type { AppSettings, Result } from "@/bindings";
 export type {
   ActivityItem,
   ApiError,
   AppSettings,
+  ChainFamily,
   ExplorerKind,
-  Network,
+  NetworkInfo,
   RuntimeConfig,
   SendPreview,
+  SendResult,
   SwapQuote,
   TokenBalance,
   TokenInfo,
@@ -55,9 +57,14 @@ export const walletApi = {
     unwrap(commands.changeWalletPassword(oldPassword, newPassword)),
   exportWalletToPath: (password: string, path: string) =>
     unwrap(commands.exportWalletToPath(password, path)),
-  changeWalletNetwork: (network: Network) =>
+  changeWalletNetwork: (network: string) =>
     unwrap(commands.changeWalletNetwork(network)),
+  listNetworks: () => commands.listNetworks(),
   getActivity: (limit: number) => unwrap(commands.getActivity(limit)),
+  previewSend: (to: string, amount: number, asset: string | null) =>
+    unwrap(commands.previewSend(to, amount, asset)),
+  sendTransfer: (password: string, to: string, amount: number, asset: string | null) =>
+    unwrap(commands.sendTransfer(password, to, amount, asset)),
   previewSolSend: (to: string, amountSol: number) =>
     unwrap(commands.previewSolSend(to, amountSol)),
   previewSplSend: (mint: string, to: string, amount: number) =>
@@ -84,7 +91,7 @@ export const walletApi = {
   getAppSettings: () => unwrap(commands.getAppSettings()),
   updateAppSettings: (settings: AppSettings) =>
     unwrap(commands.updateAppSettings(settings)),
-  getManagedDefaultRpcUrl: (network?: Network | null) =>
+  getManagedDefaultRpcUrl: (network?: string | null) =>
     commands.getManagedDefaultRpcUrl(network ?? null),
   setOnboardingDraft: (mnemonic: string, mode: string) =>
     unwrap(commands.setOnboardingDraft(mnemonic, mode)),

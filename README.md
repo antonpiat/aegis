@@ -5,11 +5,11 @@
 <h1 align="center">Taurvia</h1>
 
 <p align="center">
-  <strong>Secure. Simple. On Solana.</strong>
+  <strong>Secure. Simple. On your machine.</strong>
 </p>
 
 <p align="center">
-  A non-custodial Solana desktop wallet for retail users — keys stay on your machine, signing stays in Rust.
+  A non-custodial desktop wallet — keys stay on your machine, every signature is produced in Rust. Solana, Ethereum, and Bitcoin from one seed. Swap stays on Solana.
 </p>
 
 <p align="center">
@@ -27,16 +27,16 @@
 
 Most wallets ask you to trust a browser tab or a hosted service. Taurvia is a **native desktop app**: your seed phrase and private keys never leave your device, and every signature is produced inside a Rust core the UI cannot bypass.
 
-Built with **Tauri v2** for a small footprint and **Solana SDK 4** for mainnet-ready transactions.
+Built with **Tauri v2**. Solana is the first-class / swap chain. Ethereum and Bitcoin use the same lock, password, and IPC rules — not a dApp browser, not WalletConnect, and no JavaScript key material.
 
 ## Features
 
 | | |
 |---|---|
 | **Create & import** | New wallet, import from backup JSON, or recover from a 12/24-word seed |
-| **Balances** | SOL and SPL holdings with USD prices and portfolio total |
-| **Swap** | Any-to-any quote and execute via Jupiter (password-gated) |
-| **Send** | SOL and SPL transfers with fee preview and confirmation |
+| **Balances** | Native + token holdings (where the network supports tokens) with USD prices |
+| **Swap** | Jupiter any-to-any on Solana Mainnet only (password-gated; hidden on other networks) |
+| **Send** | Native (and tokens where supported) with a Rust-built preview: network, full recipient, amount, fee |
 | **Receive** | Address display and QR code |
 | **Activity** | Recent on-chain history |
 | **Lock screen** | Password-gated unlock, signing, and seed reveal |
@@ -50,29 +50,36 @@ flowchart TB
   UI["React UI<br/>apps/desktop<br/><i>balances · forms · QR</i><br/><b>no private keys</b>"]
   WC["wallet-core<br/><i>unlock · sign · send</i>"]
   CRYPTO["crypto<br/>Argon2id · AES-256-GCM"]
-  SOL["solana<br/>RPC · txs · SPL"]
+  REG["taurvia-chain<br/>descriptors · prices"]
+  SOL["taurvia-solana"]
+  EVM["taurvia-evm"]
+  BTC["taurvia-bitcoin"]
   STORE["storage<br/>encrypted wallet file"]
 
   UI -->|Tauri IPC| WC
   WC --> CRYPTO
-  WC --> SOL
   WC --> STORE
+  WC --> REG
+  REG --> SOL
+  REG --> EVM
+  REG --> BTC
 ```
 
-- **At rest:** Argon2id (+ optional OS keychain device binding) + AES-256-GCM encryption
-- **In memory:** keypair only while unlocked — recovery phrase is not kept in session RAM
-- **At sign time:** transactions are built and signed in Rust, not JavaScript
+- **At rest:** Argon2id (+ optional OS keychain device binding) + AES-256-GCM encryption — **one envelope** for the mnemonic, all families
+- **In memory:** family signers only while unlocked — recovery phrase is not kept in session RAM; lock drops and zeroizes the keyring
+- **At sign time:** transactions are built and signed in Rust (Solana SDK, alloy, bitcoin crate), not JavaScript
+- **Wrong-chain sends:** Rust rejects `0x` on Solana, `bc1` on Ethereum, base58 on Bitcoin, etc.
 - **Seed reveal:** re-decrypts from disk with password every time
-- **Details:** see [`doc/SECURITY.md`](doc/SECURITY.md) (device protection, backup vs seed restore)
+- **Details:** see [`doc/SECURITY.md`](doc/SECURITY.md) (device protection, backup vs seed restore, multi-family session)
 
 ## Stack
 
 | Layer | Technology |
 |-------|------------|
 | Shell | Tauri v2 |
-| Core | Rust workspace — `crypto`, `storage`, `taurvia-solana`, `wallet-core`, `models` |
+| Core | Rust workspace — `crypto`, `storage`, `taurvia-hd`, `taurvia-chain`, `taurvia-solana`, `taurvia-evm`, `taurvia-bitcoin`, `wallet-core`, `models` |
 | UI | React 19, TypeScript, Vite, Tailwind CSS 4 |
-| Chain | Solana SDK 4, SPL token interfaces |
+| Chains | Solana SDK 4 + SPL; alloy (EVM) in Rust; bitcoin 0.32 Native SegWit |
 | Package manager | pnpm |
 
 ## Getting started
@@ -93,17 +100,19 @@ pnpm install
 pnpm tauri dev
 ```
 
-### Optional: custom RPC and Jupiter
+### Optional: custom RPC
 
-By default Taurvia uses a **managed public RPC for the active cluster** (Mainnet or Devnet, chosen in Settings → Network) and keyless Jupiter APIs on Mainnet. Swap is Mainnet-only. For better reliability or higher rate limits:
+By default Taurvia uses a **managed public RPC for the active network** (Settings → Network). Swap is Solana Mainnet-only. For better reliability or higher rate limits:
 
 ```bash
 cp ../../.env.example ../../.env
 # TAURVIA_RPC_URL=https://mainnet.helius-rpc.com/?api-key=YOUR_KEY
+# TAURVIA_ETH_RPC_URL=https://eth.llamarpc.com
+# TAURVIA_BTC_ESPLORA_URL=https://blockstream.info/api
 # TAURVIA_JUPITER_API_KEY=YOUR_PORTAL_KEY   # free at https://portal.jup.ag
 ```
 
-`TAURVIA_RPC_URL` overrides the managed default for whichever cluster is selected.
+`TAURVIA_RPC_URL` overrides the managed Solana default. Ethereum and Bitcoin have their own env keys. Custom RPC in Settings → Advanced is still per-network.
 ### Build
 
 Local builds produce packages for the **host OS only**. On Linux that means `.deb`, `.rpm`, and `.AppImage`:
@@ -115,7 +124,10 @@ pnpm tauri build
 
 Output lands in `target/release/bundle/`.
 
-Windows (`.msi` / NSIS) and macOS (`.dmg` / `.app`) are built unsigned by the [Desktop build](.github/workflows/desktop-build.yml) GitHub Actions workflow on `main` pushes or manual dispatch (not on PRs). Download the `taurvia-*-unsigned` artifacts from the workflow run. These builds are not code-signed or notarized.
+[CI](.github/workflows/ci.yml) runs `cargo test` and TypeScript checks on every pull request and every push to `main`. It does not package installers.
+
+Installers (Linux `.deb` / `.rpm` / `.AppImage`, Windows `.msi` / NSIS, macOS `.dmg`) are produced by [Release](.github/workflows/release.yml) only when you push a `vX.Y.Z` tag whose commit is on `main` and already has a green CI run. Assets land on the GitHub Release. These builds are not code-signed or notarized yet.
+
 ### Test the Rust workspace
 
 ```bash
@@ -133,26 +145,54 @@ flowchart LR
   Shell --> WC["wallet-core"]
   WC --> CRYPTO["crypto"]
   WC --> STORE["storage"]
-  WC --> SOL["taurvia-solana"]
+  WC --> HD["taurvia-hd"]
+  WC --> REG["taurvia-chain"]
+  REG --> SOL["taurvia-solana"]
+  REG --> EVM["taurvia-evm"]
+  REG --> BTC["taurvia-bitcoin"]
   STORE --> DISK[("~/.local/share/com.taurvia.wallet")]
 ```
 
 | Crate | Responsibility |
 |-------|----------------|
-| `models` | Shared DTOs (+ specta types for TS bindings) |
+| `models` | Shared DTOs, `NetworkDescriptor` table (+ specta types) |
 | `crypto` | Argon2id + AES-256-GCM primitives only |
 | `storage` | Persist `WalletFile` JSON to disk (does not encrypt) |
-| `taurvia-solana` | Keypairs, RPC, transfers |
-| `wallet-core` | Session, encrypt/decrypt assembly, signing orchestration |
+| `taurvia-hd` | BIP39 generate / validate / seed (no IPC) |
+| `taurvia-chain` | Registry, address-family checks, shared HTTP + prices |
+| `taurvia-solana` | Solana RPC, SPL, Jupiter swap |
+| `taurvia-evm` | alloy provider, EIP-1559, ERC-20 |
+| `taurvia-bitcoin` | BIP84 Native SegWit, Esplora |
+| `wallet-core` | Session, encrypt/decrypt, password-gated dispatch **by family** |
 | `taurvia-desktop` | Thin Tauri shell + IPC commands |
+
+### Derivation (compatibility, not product identity)
+
+Same BIP39 seed as Phantom / MetaMask / typical BIP84 wallets. Tests live next to the derivation code.
+
+| Family | Path | Address |
+|--------|------|---------|
+| Solana | `m/44'/501'/0'/0'` | base58 |
+| Ethereum (and later Polygon/Base) | `m/44'/60'/0'/0/0` | EIP-55 `0x…` |
+| Bitcoin | `m/84'/0'/0'/0/0` (testnet `m/84'/1'/0'/0/0`) | Native SegWit `bc1q` / `tb1q` |
+| Sui (later) | SLIP-0010 `m/44'/784'/0'/0'/0'` | — |
+
+### Adding a network
+
+| You want | What to change |
+|---------|----------------|
+| **Polygon / Base** (or another EVM L2) | One `NetworkDescriptor` row: RPC, `eip155_chain_id`, explorer, token list, `enabled: true`. Same `EvmSigner`. No new crate. |
+| **A new VM** (Sui) | New `crates/taurvia-sui` implementing the chain backend, `ChainFamily` variant, `FamilyKeyring` field. UI picks it up from `list_networks()`. |
+
+Signing still cannot move to JavaScript. Disabled stubs already exist for `polygon-mainnet`, `polygon-amoy`, `base-mainnet`, `base-sepolia`, and `sui-mainnet`.
 
 ### Future extension points
 
 | Growth | Where it goes |
 |--------|----------------|
 | Hardware / USB cold storage | New `crates/device` or module under `wallet-core` |
-| Second chain | New `crates/<chain>` + `wallet-core` facade |
-| Explorer links | Activity / Send / Swap open Solscan or Solana Explorer (Settings) |
+| WalletConnect / dApp browser | **Out of scope** — would invert “the UI cannot bypass Rust” |
+| Explorer links | Solana: Settings (Solscan / Solana Explorer). Other families: descriptor `explorer_tx` |
 | QR scan | Prefer native/Rust on Linux (not webview WebRTC) |
 
 ## Project structure
@@ -164,8 +204,12 @@ taurvia/
 │   └── src-tauri/src/commands # wallet / balances / send / swap
 ├── crates/
 │   ├── crypto/                # Argon2id + AES-256-GCM
-│   ├── models/                # shared types
-│   ├── taurvia-solana/          # RPC, transfers, Jupiter price/swap
+│   ├── models/                # shared types + network descriptors
+│   ├── taurvia-hd/            # BIP39
+│   ├── taurvia-chain/         # registry, mismatch checks, prices
+│   ├── taurvia-solana/        # RPC, transfers, Jupiter
+│   ├── taurvia-evm/           # alloy, EIP-1559, ERC-20
+│   ├── taurvia-bitcoin/       # BIP84, Esplora
 │   ├── storage/               # wallet file persistence
 │   └── wallet-core/           # session, signing, snapshots, swap
 └── doc/                       # project docs

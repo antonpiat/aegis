@@ -11,12 +11,13 @@ import { useNavigate } from "react-router-dom";
 import { normalizeExplorer } from "@/lib/explorer";
 import { normalizeAppView, restoreSavedWindowSize } from "@/lib/appView";
 import { DEFAULT_AUTO_LOCK_MINUTES, normalizeAutoLockMinutes } from "@/lib/autoLock";
-import { DEFAULT_NETWORK_ID, toNetwork } from "@/lib/network";
-import type { AppSettings, ExplorerKind, Network, RuntimeConfig } from "@/lib/tauri";
+import { DEFAULT_NETWORK_ID, findNetwork, normalizeNetworkId } from "@/lib/network";
+import type { AppSettings, ExplorerKind, NetworkInfo, RuntimeConfig } from "@/lib/tauri";
 import { TokenBalance, walletApi } from "@/lib/tauri";
 
 const DEFAULT_SETTINGS: AppSettings = {
   rpc_url: null,
+  rpc_urls: {},
   jupiter_api_key: null,
   network: DEFAULT_NETWORK_ID,
   auto_lock_minutes: DEFAULT_AUTO_LOCK_MINUTES,
@@ -35,8 +36,14 @@ interface WalletContextValue {
   walletExists: boolean;
   unlocked: boolean;
   publicKey: string | null;
-  /** Wallet file network id (`solana-mainnet`, …). */
   network: string;
+  networks: NetworkInfo[];
+  networkInfo: NetworkInfo | undefined;
+  nativeBalance: number | null;
+  nativeSymbol: string;
+  nativePriceUsd: number | null;
+  nativeValueUsd: number | null;
+  /** Alias for Solana swap UI. */
   solBalance: number | null;
   solPriceUsd: number | null;
   solValueUsd: number | null;
@@ -52,7 +59,7 @@ interface WalletContextValue {
   reloadSettings: () => Promise<AppSettings>;
   saveSettings: (next: AppSettings) => Promise<RuntimeConfig>;
   setHideBalances: (hidden: boolean) => Promise<void>;
-  changeNetwork: (network: Network) => Promise<RuntimeConfig>;
+  changeNetwork: (network: string) => Promise<RuntimeConfig>;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -65,9 +72,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [unlocked, setUnlocked] = useState(false);
   const [publicKey, setPublicKey] = useState<string | null>(null);
   const [network, setNetwork] = useState(DEFAULT_NETWORK_ID);
-  const [solBalance, setSolBalance] = useState<number | null>(null);
-  const [solPriceUsd, setSolPriceUsd] = useState<number | null>(null);
-  const [solValueUsd, setSolValueUsd] = useState<number | null>(null);
+  const [networks, setNetworks] = useState<NetworkInfo[]>([]);
+  const [nativeBalance, setNativeBalance] = useState<number | null>(null);
+  const [nativeSymbol, setNativeSymbol] = useState("SOL");
+  const [nativePriceUsd, setNativePriceUsd] = useState<number | null>(null);
+  const [nativeValueUsd, setNativeValueUsd] = useState<number | null>(null);
   const [totalPortfolioUsd, setTotalPortfolioUsd] = useState<number | null>(null);
   const [tokens, setTokens] = useState<TokenBalance[]>([]);
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
@@ -93,10 +102,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setWalletExists(snapshot.exists);
       setUnlocked(snapshot.unlocked);
       setPublicKey(snapshot.public_key);
-      setNetwork(toNetwork(snapshot.network));
-      setSolBalance(snapshot.sol_balance);
-      setSolPriceUsd(snapshot.sol_price_usd);
-      setSolValueUsd(snapshot.sol_value_usd);
+      setNetwork(normalizeNetworkId(snapshot.network));
+      setNativeBalance(snapshot.native_balance);
+      setNativeSymbol(snapshot.native_symbol || "SOL");
+      setNativePriceUsd(snapshot.native_price_usd);
+      setNativeValueUsd(snapshot.native_value_usd);
       setTotalPortfolioUsd(snapshot.total_portfolio_usd);
       setTokens(snapshot.tokens ?? []);
     },
@@ -143,7 +153,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
             : Boolean(next.hide_balances),
         default_slippage_bps: next.default_slippage_bps ?? DEFAULT_SETTINGS.default_slippage_bps,
         auto_lock_minutes: normalizeAutoLockMinutes(next.auto_lock_minutes),
-        network: toNetwork(next.network ?? DEFAULT_SETTINGS.network),
+        network: normalizeNetworkId(next.network ?? DEFAULT_SETTINGS.network),
+        rpc_urls: next.rpc_urls ?? {},
         swap_favorite_tokens: next.swap_favorite_tokens ?? [],
       };
       setSettings(merged);
@@ -160,7 +171,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       explorer: normalizeExplorer(next.explorer),
       app_view: normalizeAppView(next.app_view),
       auto_lock_minutes: normalizeAutoLockMinutes(next.auto_lock_minutes),
-      network: toNetwork(next.network),
+      network: normalizeNetworkId(next.network),
     };
     const runtime = await walletApi.updateAppSettings(payload);
     setSettings(payload);
@@ -175,10 +186,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   );
 
   const changeNetwork = useCallback(
-    async (nextNetwork: Network) => {
+    async (nextNetwork: string) => {
       const runtime = await walletApi.changeWalletNetwork(nextNetwork);
-      setNetwork(nextNetwork);
-      // Settings reload is local; balances hit RPC — refresh in background.
+      setNetwork(normalizeNetworkId(nextNetwork));
       void reloadSettings();
       void refresh();
       return runtime;
@@ -194,9 +204,9 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     await walletApi.lockWallet();
     setUnlocked(false);
     setPublicKey(null);
-    setSolBalance(null);
-    setSolPriceUsd(null);
-    setSolValueUsd(null);
+    setNativeBalance(null);
+    setNativePriceUsd(null);
+    setNativeValueUsd(null);
     setTotalPortfolioUsd(null);
     setTokens([]);
     setBalancesLoading(false);
@@ -222,6 +232,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     void (async () => {
       setLoading(true);
+      try {
+        const listed = await walletApi.listNetworks();
+        setNetworks(listed);
+      } catch {
+        setNetworks([]);
+      }
       const [, loaded] = await Promise.all([refresh(), reloadSettings()]);
       if (!restoredWindowSize.current) {
         restoredWindowSize.current = true;
@@ -240,7 +256,6 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       return;
     }
     scheduleAutoLock();
-    // Skip mousemove — it resets the timer on every pixel and tanks idle CPU.
     const onActivity = () => scheduleAutoLock();
     const windowEvents: Array<keyof WindowEventMap> = [
       "pointerdown",
@@ -270,15 +285,18 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setWalletExists(true);
       setUnlocked(true);
       setPublicKey(key);
-      setSolBalance(null);
-      setSolPriceUsd(null);
-      setSolValueUsd(null);
+      setNativeBalance(null);
+      setNativePriceUsd(null);
+      setNativeValueUsd(null);
       setTotalPortfolioUsd(null);
       setTokens([]);
       void refresh();
     },
     [refresh],
   );
+
+  const networkInfo = useMemo(() => findNetwork(networks, network), [networks, network]);
+  const solanaNative = networkInfo?.family === "solana" ? nativeBalance : null;
 
   const value = useMemo(
     () => ({
@@ -288,9 +306,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       unlocked,
       publicKey,
       network,
-      solBalance,
-      solPriceUsd,
-      solValueUsd,
+      networks,
+      networkInfo,
+      nativeBalance,
+      nativeSymbol,
+      nativePriceUsd,
+      nativeValueUsd,
+      solBalance: solanaNative,
+      solPriceUsd: networkInfo?.family === "solana" ? nativePriceUsd : null,
+      solValueUsd: networkInfo?.family === "solana" ? nativeValueUsd : null,
       totalPortfolioUsd,
       tokens,
       settings,
@@ -312,9 +336,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       unlocked,
       publicKey,
       network,
-      solBalance,
-      solPriceUsd,
-      solValueUsd,
+      networks,
+      networkInfo,
+      nativeBalance,
+      nativeSymbol,
+      nativePriceUsd,
+      nativeValueUsd,
+      solanaNative,
       totalPortfolioUsd,
       tokens,
       settings,

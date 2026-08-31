@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { openUrl } from "@tauri-apps/plugin-opener";
 import { TokenDropdown, type DropdownToken } from "@/components/TokenDropdown";
 import { PageHeader } from "@/components/PageHeader";
@@ -16,16 +16,21 @@ import {
 import { Alert } from "@/components/ui/misc";
 import { useWallet } from "@/context/WalletContext";
 import { txExplorerUrl } from "@/lib/explorer";
+import { nativeAssetId } from "@/lib/network";
 import { ApiError, SendPreview, walletApi } from "@/lib/tauri";
 import { localLogoForMint, withLocalLogo, WRAPPED_SOL } from "@/lib/tokenCatalog";
 import { shortenAddress } from "@/lib/utils";
 
-const SOL_MINT = "sol";
-
 export function SendPage() {
-  const { solBalance, tokens, refreshBalances, explorer, network } = useWallet();
-  const [selectedMint, setSelectedMint] = useState(SOL_MINT);
+  const { nativeBalance, nativeSymbol, tokens, refreshBalances, explorer, network, networkInfo } =
+    useWallet();
+  const nativeMint = nativeAssetId(networkInfo?.family);
+  const [selectedMint, setSelectedMint] = useState(nativeMint);
   const [pickerOpen, setPickerOpen] = useState(false);
+
+  useEffect(() => {
+    setSelectedMint(nativeMint);
+  }, [nativeMint]);
   const [to, setTo] = useState("");
   const [amount, setAmount] = useState("");
   const [password, setPassword] = useState("");
@@ -34,36 +39,48 @@ export function SendPage() {
   const [error, setError] = useState<string | null>(null);
   const [confirmError, setConfirmError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
-  const [successSignature, setSuccessSignature] = useState<string | null>(null);
+  const [successTxid, setSuccessTxid] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
+
+  const showTokens = Boolean(networkInfo?.features.tokens);
 
   const selectable = useMemo<DropdownToken[]>(() => {
     const options: DropdownToken[] = [
       {
-        mint: SOL_MINT,
-        symbol: "SOL",
-        name: "Solana",
-        logo_uri: localLogoForMint(WRAPPED_SOL),
-        balanceUi: solBalance ?? 0,
+        mint: nativeMint,
+        symbol: nativeSymbol,
+        name: networkInfo?.name ?? nativeSymbol,
+        logo_uri: nativeSymbol === "SOL" ? localLogoForMint(WRAPPED_SOL) : null,
+        balanceUi: nativeBalance ?? 0,
       },
     ];
-    for (const token of tokens) {
-      const branded = withLocalLogo(token);
-      options.push({
-        mint: branded.mint,
-        symbol: branded.symbol,
-        name: branded.name,
-        logo_uri: branded.logo_uri,
-        balanceUi: branded.ui_amount,
-      });
+    if (showTokens) {
+      for (const token of tokens) {
+        const branded = withLocalLogo(token);
+        options.push({
+          mint: branded.mint,
+          symbol: branded.symbol,
+          name: branded.name,
+          logo_uri: branded.logo_uri,
+          balanceUi: branded.ui_amount,
+        });
+      }
     }
     return options;
-  }, [solBalance, tokens]);
+  }, [nativeBalance, nativeMint, nativeSymbol, networkInfo?.name, showTokens, tokens]);
 
-  const selectedToken = selectable.find((token) => token.mint === selectedMint);
-  const isSol = selectedMint === SOL_MINT;
-  const tokenSymbol = selectedToken?.symbol ?? (isSol ? "SOL" : "token");
+  const selectedToken = selectable.find((token) => token.mint === selectedMint) ?? selectable[0];
+  const isNative = selectedToken?.mint === nativeMint;
+  const tokenSymbol = selectedToken?.symbol ?? nativeSymbol;
+  const recipientPlaceholder =
+    networkInfo?.family === "evm"
+      ? "0x…"
+      : networkInfo?.family === "bitcoin"
+        ? networkInfo.is_testnet
+          ? "tb1q…"
+          : "bc1q…"
+        : "Solana address";
 
   const handlePreview = async () => {
     setError(null);
@@ -75,9 +92,8 @@ export function SendPage() {
       if (!Number.isFinite(amountNum) || amountNum <= 0) {
         throw new Error("Enter a valid amount");
       }
-      const result = isSol
-        ? await walletApi.previewSolSend(to, amountNum)
-        : await walletApi.previewSplSend(selectedMint, to, amountNum);
+      const asset = isNative ? nativeMint : selectedMint;
+      const result = await walletApi.previewSend(to, amountNum, asset);
       setPreview(result);
       setConfirmOpen(true);
     } catch (err) {
@@ -94,11 +110,10 @@ export function SendPage() {
     setConfirmError(null);
     try {
       const amountNum = Number(amount);
-      const result = isSol
-        ? await walletApi.sendSol(password, to, amountNum)
-        : await walletApi.sendSpl(password, selectedMint, to, amountNum);
-      setSuccess(`Transaction confirmed: ${shortenAddress(result.signature, 8)}`);
-      setSuccessSignature(result.signature);
+      const asset = isNative ? nativeMint : selectedMint;
+      const result = await walletApi.sendTransfer(password, to, amountNum, asset);
+      setSuccess(`Transaction submitted: ${shortenAddress(result.txid, 8)}`);
+      setSuccessTxid(result.txid);
       setConfirmOpen(false);
       setPassword("");
       setConfirmError(null);
@@ -116,7 +131,10 @@ export function SendPage() {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <PageHeader title="Send" description="Transfer SOL or SPL tokens securely." />
+      <PageHeader
+        title="Send"
+        description={`Transfer ${nativeSymbol}${showTokens ? " or tokens" : ""} securely.`}
+      />
 
       <Card>
         <CardHeader>
@@ -124,28 +142,35 @@ export function SendPage() {
           <CardDescription>Review carefully before confirming.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
-          <TokenDropdown
-            label="Token"
-            token={selectedToken}
-            tokens={selectable}
-            selectedMint={selectedMint}
-            placeholder="Select token"
-            open={pickerOpen}
-            onOpenChange={setPickerOpen}
-            onSelect={(mint) => {
-              setSelectedMint(mint);
-              setPickerOpen(false);
-              setError(null);
-              setSuccess(null);
-            }}
-          />
+          {showTokens ? (
+            <TokenDropdown
+              label="Token"
+              token={selectedToken}
+              tokens={selectable}
+              selectedMint={selectedMint}
+              placeholder="Select token"
+              open={pickerOpen}
+              onOpenChange={setPickerOpen}
+              onSelect={(mint) => {
+                setSelectedMint(mint);
+                setPickerOpen(false);
+                setError(null);
+                setSuccess(null);
+              }}
+            />
+          ) : (
+            <div className="space-y-2">
+              <Label>Asset</Label>
+              <p className="font-medium">{nativeSymbol}</p>
+            </div>
+          )}
           <div className="space-y-2">
             <Label htmlFor="to">Recipient address</Label>
             <Input
               id="to"
               value={to}
               onChange={(e) => setTo(e.target.value)}
-              placeholder="Solana address"
+              placeholder={recipientPlaceholder}
             />
           </div>
           <div className="space-y-2">
@@ -170,11 +195,13 @@ export function SendPage() {
           {success && (
             <Alert className="border-primary/40 text-primary">
               <p>{success}</p>
-              {successSignature && (
+              {successTxid && (
                 <button
                   type="button"
                   className="mt-1 font-mono text-xs underline-offset-2 hover:underline"
-                  onClick={() => void openUrl(txExplorerUrl(explorer, successSignature, { network }))}
+                  onClick={() =>
+                    void openUrl(txExplorerUrl(explorer, successTxid, { network, info: networkInfo }))
+                  }
                 >
                   View on explorer
                 </button>
@@ -207,16 +234,20 @@ export function SendPage() {
           {preview && (
             <div className="space-y-3 text-sm">
               <div className="flex justify-between">
+                <span className="text-muted-foreground">Network</span>
+                <span className="font-medium">{preview.network_name}</span>
+              </div>
+              <div className="flex justify-between">
                 <span className="text-muted-foreground">Token</span>
-                <span className="font-medium">{tokenSymbol}</span>
+                <span className="font-medium">{preview.token || tokenSymbol}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">From</span>
                 <span className="font-mono">{shortenAddress(preview.from, 6)}</span>
               </div>
-              <div className="flex justify-between">
+              <div className="flex flex-col gap-1">
                 <span className="text-muted-foreground">To</span>
-                <span className="font-mono">{shortenAddress(preview.to, 6)}</span>
+                <span className="break-all font-mono text-xs">{preview.to}</span>
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Amount</span>
@@ -226,7 +257,9 @@ export function SendPage() {
               </div>
               <div className="flex justify-between">
                 <span className="text-muted-foreground">Estimated fee</span>
-                <span>{preview.estimated_fee_sol.toFixed(6)} SOL</span>
+                <span>
+                  {preview.estimated_fee.toFixed(nativeSymbol === "BTC" ? 8 : 6)} {preview.fee_symbol}
+                </span>
               </div>
               {preview.creates_token_account && (
                 <Alert>A token account will be created for this asset.</Alert>

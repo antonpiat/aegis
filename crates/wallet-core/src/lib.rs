@@ -89,17 +89,14 @@ mod tests {
         let mnemonic = service.generate_mnemonic().unwrap();
         service.create_wallet(&mnemonic, "Password123!").unwrap();
         service
-            .change_network(models::Network::SolanaDevnet)
+            .change_network("solana-devnet")
             .unwrap();
 
         let mut settings = service.get_settings();
-        settings.network = models::Network::SolanaMainnet;
+        settings.network = "solana-mainnet".into();
         let _ = service.update_settings(settings).unwrap();
 
-        assert_eq!(
-            service.get_settings().network,
-            models::Network::SolanaDevnet
-        );
+        assert_eq!(service.get_settings().network, "solana-devnet");
         assert_eq!(service.wallet_network(), "solana-devnet");
     }
 
@@ -111,7 +108,7 @@ mod tests {
         service.create_wallet(&mnemonic, "Password123!").unwrap();
         service.unlock("Password123!").unwrap();
         service
-            .change_network(models::Network::SolanaDevnet)
+            .change_network("solana-devnet")
             .unwrap();
 
         let preview_err = service

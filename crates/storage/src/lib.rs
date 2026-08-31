@@ -157,6 +157,7 @@ mod tests {
             public_key: "test".into(),
             created_at: "2026-01-01T00:00:00Z".into(),
             protection: WalletProtection::Password,
+            addresses: Default::default(),
             crypto: CryptoEnvelope {
                 kdf: "argon2id".into(),
                 salt: "c2FsdA==".into(),

@@ -1,6 +1,6 @@
 # Security Policy
 
-Taurvia is a **non-custodial Solana desktop wallet**. Your keys stay on your machine. Because this software handles cryptocurrency, we take security reports seriously.
+Taurvia is a **non-custodial desktop wallet**. Your keys stay on your machine. Because this software handles cryptocurrency, we take security reports seriously.
 
 ## Supported versions
 
@@ -41,24 +41,33 @@ We aim to acknowledge reports within **72 hours** and will work with you on a fi
 
 - Social engineering or phishing targeting users directly
 - Compromise of the user's OS, password, or physical device
-- Solana network, RPC provider, or third-party infrastructure bugs
+- Solana network, RPC provider, Esplora, Etherscan-compatible APIs, or other third-party infrastructure bugs
 - Loss of funds from user error (wrong address, leaked seed written on paper, etc.)
 - Issues in unreleased or modified builds not matching an official GitHub Release
 
 ## Security model (summary)
 
 ```
-React UI  →  Tauri IPC  →  wallet-core (Rust)  →  crypto / storage / taurvia-solana
+React UI  →  Tauri IPC  →  wallet-core (Rust)  →  crypto / storage / family crates
 ```
 
-- Private keys and mnemonics are encrypted at rest on disk (`wallet.json`).
-- Unlock loads the **keypair only** into the session for signing. The recovery phrase is **not** kept in RAM while unlocked.
+The IPC boundary is the trust boundary. The React UI never receives mnemonics, private keys, or raw signers. Specta types are public: addresses, balances, previews, txids. Seed reveal is the only exception, still password + re-decrypt from disk, still not stored in session.
+
+- Private keys and mnemonics are encrypted at rest on disk (`wallet.json`) in **one envelope**. New chains do not get separate wallet files or weaker encryption.
+- Unlock derives a **family keyring** (Solana ed25519 + EVM secp256k1 + Bitcoin mainnet/testnet) from the mnemonic, then drops the mnemonic. Unlock returns immediately; balances load in the background against the **active network only**.
 - Revealing the recovery phrase always re-authenticates with the wallet password and re-decrypts from disk (ephemeral); plaintext is not stored back into the session.
-- Signing happens only in Rust after password verification for send/swap.
-- The frontend does not receive raw secrets except when you explicitly reveal the phrase.
-- Switching Mainnet ↔ Devnet updates wallet metadata + RPC only (no password); the keypair is unchanged. Devnet is not real funds; Swap is Mainnet-only (enforced in Rust, not only in the UI).
+- Signing happens only in Rust after password verification for send/swap. Network switch is metadata + RPC only (no password), same as Mainnet ↔ Devnet today.
+- On `lock()`, the session is dropped. EVM and Bitcoin secrets use `zeroize`; Solana key material is dropped with the keyring.
+- **Address-family checks** live in Rust (`validate_recipient`): a `0x` address is rejected on Solana, `bc1` on Ethereum, base58 on Bitcoin. Receive-page copy is not the control.
+- **EIP-155 `chain_id` is taken from the network descriptor**, never from the UI, so a Base payload cannot be signed as Ethereum.
+- Swap remains Solana Mainnet only (`features.swap` **and** Rust mainnet checks).
+- Switching networks does not fan out RPC to every chain (speed + do not leak every address to every provider).
 
 See the [README](../README.md#security) for the full architecture diagram.
+
+## Out of scope (infrastructure)
+
+RPC providers, Esplora, Etherscan-compatible APIs, Jupiter, and CoinGecko are **out of scope** as third-party infrastructure. Compromise of an RPC can lie about balances or pending state; it cannot extract keys from a locked wallet. Do not treat a custom RPC as a security boundary.
 
 ## Wallet encryption
 
@@ -96,7 +105,7 @@ Malware on an unlocked enrolled device remains high risk: the private key is in 
 
 ## Dependency security
 
-Taurvia depends on Rust crates (Solana SDK, `aes-gcm`, `argon2`, etc.) and npm packages (Tauri, React). We update dependencies as part of regular maintenance. Report supply-chain or dependency issues through the same private channel above.
+Taurvia depends on Rust crates (Solana SDK, alloy, bitcoin, `aes-gcm`, `argon2`, etc.) and npm packages (Tauri, React). We update dependencies as part of regular maintenance. Report supply-chain or dependency issues through the same private channel above.
 
 ## Disclosure policy
 

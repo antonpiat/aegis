@@ -1,63 +1,91 @@
 /**
- * Network identity helpers.
- * Solana mainnet/devnet today; keep labels/URLs here so EVM can plug in later.
+ * Network identity helpers. Labels and features come from Rust `list_networks()`.
  */
 
-import type { Network } from "@/bindings";
+import type { ChainFamily, NetworkInfo } from "@/bindings";
 
-export const DEFAULT_NETWORK_ID: Network = "solana-mainnet";
+export const DEFAULT_NETWORK_ID = "solana-mainnet";
 
 export function normalizeNetworkId(value: unknown): string {
-  if (value === "solana-devnet" || value === "devnet") return "solana-devnet";
-  if (value === "solana-mainnet" || value === "mainnet") return "solana-mainnet";
   if (typeof value === "string" && value.trim() !== "") {
+    if (value.trim() === "devnet") return "solana-devnet";
+    if (value.trim() === "mainnet") return "solana-mainnet";
     return value.trim();
   }
   return DEFAULT_NETWORK_ID;
 }
 
-export function toNetwork(value: unknown): Network {
-  return normalizeNetworkId(value) === "solana-devnet"
-    ? "solana-devnet"
-    : "solana-mainnet";
+export function findNetwork(
+  networks: NetworkInfo[],
+  id: unknown,
+): NetworkInfo | undefined {
+  const normalized = normalizeNetworkId(id);
+  return networks.find((n) => n.id === normalized);
 }
 
-export function isMainnet(id: unknown): boolean {
-  return toNetwork(id) === "solana-mainnet";
+export function enabledNetworks(networks: NetworkInfo[]): NetworkInfo[] {
+  return networks.filter((n) => n.enabled);
 }
 
-/** Short chip label: Mainnet / Devnet / raw id for unknown chains. */
-export function networkShortLabel(id: unknown): string {
-  switch (normalizeNetworkId(id)) {
-    case "solana-mainnet":
-      return "Mainnet";
-    case "solana-devnet":
-      return "Devnet";
-    default:
-      return normalizeNetworkId(id);
+export function isMainnet(info: NetworkInfo | undefined): boolean {
+  return Boolean(info && !info.is_testnet);
+}
+
+export function canSwap(info: NetworkInfo | undefined): boolean {
+  return Boolean(info?.features.swap && !info.is_testnet);
+}
+
+export function networkShortLabel(info: NetworkInfo | undefined, id?: unknown): string {
+  if (info) {
+    return info.is_testnet ? `${info.name}` : info.name;
   }
-}
-
-/**
- * Solana explorer cluster query value.
- * Returns null for non-Solana ids (future EVM) so callers skip cluster params.
- */
-export function networkCluster(id: unknown): "mainnet-beta" | "devnet" | null {
-  switch (normalizeNetworkId(id)) {
-    case "solana-mainnet":
-      return "mainnet-beta";
-    case "solana-devnet":
-      return "devnet";
-    default:
-      return null;
-  }
-}
-
-export function isSolanaNetwork(id: unknown): boolean {
-  return normalizeNetworkId(id).startsWith("solana-");
+  return normalizeNetworkId(id);
 }
 
 /** Shell subtitle under the brand mark. */
-export function productChainLabel(id: unknown): string {
-  return isSolanaNetwork(id) ? "Solana Wallet" : "Wallet";
+export function productChainLabel(info: NetworkInfo | undefined): string {
+  if (!info) return "Wallet";
+  switch (info.family) {
+    case "solana":
+      return "Solana Wallet";
+    case "evm":
+      return "Ethereum Wallet";
+    case "bitcoin":
+      return "Bitcoin Wallet";
+    case "sui":
+      return "Sui Wallet";
+    default:
+      return "Wallet";
+  }
+}
+
+export function nativeAssetId(family: ChainFamily | undefined): string {
+  switch (family) {
+    case "evm":
+      return "eth";
+    case "bitcoin":
+      return "btc";
+    default:
+      return "sol";
+  }
+}
+
+export function receiveWarning(info: NetworkInfo | undefined): string {
+  const name = info?.name ?? "this network";
+  return `Only send ${name} assets to this address.`;
+}
+
+export function familyLabel(family: ChainFamily): string {
+  switch (family) {
+    case "solana":
+      return "Solana";
+    case "evm":
+      return "Ethereum";
+    case "bitcoin":
+      return "Bitcoin";
+    case "sui":
+      return "Sui";
+    default:
+      return family;
+  }
 }

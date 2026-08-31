@@ -1,6 +1,6 @@
 use crate::error::{map_wallet_error, CommandResult};
 use crate::state::AppState;
-use models::{managed_rpc_url, AppSettings, Network, OnboardingDraft, RuntimeConfig};
+use models::{managed_rpc_url, AppSettings, OnboardingDraft, RuntimeConfig};
 use tauri::State;
 
 #[tauri::command]
@@ -23,9 +23,12 @@ pub fn update_app_settings(
 
 #[tauri::command]
 #[specta::specta]
-pub fn get_managed_default_rpc_url(network: Option<Network>) -> String {
-    let network = network.unwrap_or(Network::SolanaMainnet);
-    managed_rpc_url(network).to_string()
+pub fn get_managed_default_rpc_url(network: Option<String>) -> String {
+    let id = network
+        .as_deref()
+        .map(models::normalize_network_id)
+        .unwrap_or(models::DEFAULT_NETWORK_ID);
+    managed_rpc_url(id).to_string()
 }
 
 #[tauri::command]

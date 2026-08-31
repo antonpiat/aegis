@@ -3,7 +3,11 @@ members = [
     "crates/models",
     "crates/crypto",
     "crates/storage",
+    "crates/taurvia-hd",
+    "crates/taurvia-chain",
     "crates/taurvia-solana",
+    "crates/taurvia-evm",
+    "crates/taurvia-bitcoin",
     "crates/wallet-core",
     "apps/desktop/src-tauri",
 ]
@@ -29,6 +33,12 @@ hkdf = "0.13.0"
 sha2 = "0.11.0"
 keyring = "4.1.6"
 bip39 = "2.2.2"
+bip32 = "0.5.3"
+hex = "0.4.3"
+k256 = { version = "0.13.4", features = ["ecdsa"] }
+sha3 = "0.10.8"
+bitcoin = { version = "0.32.7", default-features = false, features = ["std", "rand-std"] }
+async-trait = "0.1.89"
 solana-sdk = "4.0.1"
 solana-client = "4.1.2"
 solana-commitment-config = "3.1.1"

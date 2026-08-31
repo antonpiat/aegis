@@ -23,9 +23,10 @@ export function WelcomePage() {
             <BrandMark className="h-7 w-7" />
             <span className="text-xl font-semibold">Taurvia</span>
           </div>
-          <CardTitle>Welcome to your Solana wallet</CardTitle>
+          <CardTitle>Welcome to Taurvia</CardTitle>
           <CardDescription>
-            Non-custodial, local, and secure. Your keys never leave this device.
+            A native desktop wallet. Your keys never leave this device, and the UI cannot sign for
+            you.
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">

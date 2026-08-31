@@ -70,7 +70,7 @@ export function UnlockPage() {
             <span className="font-semibold">Taurvia</span>
           </div>
           <CardTitle>Unlock wallet</CardTitle>
-          <CardDescription>Enter your password to access your Solana wallet.</CardDescription>
+          <CardDescription>Enter your password to unlock the wallet on this device.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <form className="space-y-4" onSubmit={handleUnlock}>

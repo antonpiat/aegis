@@ -1,14 +1,89 @@
-use models::{AppSettings, Network, RuntimeConfig, WalletFile};
+use models::{
+    normalize_network_id, require_network, AppSettings, ChainFamily, RuntimeConfig, WalletFile,
+    DEFAULT_NETWORK_ID,
+};
 use std::path::Path;
 use std::sync::{Arc, Mutex};
 use storage::{AppConfigStore, DeviceSecretStore, FileWalletStore};
 use taurvia_solana::{configure_jupiter_api_key, Keypair, Pubkey, Signer, SolanaRpc};
 
 use crate::WalletError;
+use zeroize::Zeroize;
+
+pub(crate) struct FamilyKeyring {
+    pub solana: Keypair,
+    pub evm: taurvia_evm::EvmSigner,
+    pub bitcoin: taurvia_bitcoin::BtcSigner,
+    pub bitcoin_testnet: taurvia_bitcoin::BtcSigner,
+}
+
+impl FamilyKeyring {
+    pub fn from_mnemonic(mnemonic: &str) -> Result<Self, WalletError> {
+        let seed = taurvia_hd::seed_from_mnemonic(mnemonic).map_err(|_| WalletError::InvalidMnemonic)?;
+        let solana = taurvia_solana::derive_keypair_from_seed(seed.as_slice())
+            .map_err(|_| WalletError::InvalidMnemonic)?;
+        let evm = taurvia_evm::derive_from_seed(seed.as_slice()).map_err(WalletError::Operation)?;
+        let bitcoin = taurvia_bitcoin::derive_from_seed(seed.as_slice(), false)
+            .map_err(WalletError::Operation)?;
+        let bitcoin_testnet = taurvia_bitcoin::derive_from_seed(seed.as_slice(), true)
+            .map_err(WalletError::Operation)?;
+        Ok(Self {
+            solana,
+            evm,
+            bitcoin,
+            bitcoin_testnet,
+        })
+    }
+
+    pub fn from_solana_and_mnemonic(solana: Keypair, mnemonic: &str) -> Result<Self, WalletError> {
+        let seed = taurvia_hd::seed_from_mnemonic(mnemonic).map_err(|_| WalletError::InvalidMnemonic)?;
+        let evm = taurvia_evm::derive_from_seed(seed.as_slice()).map_err(WalletError::Operation)?;
+        let bitcoin = taurvia_bitcoin::derive_from_seed(seed.as_slice(), false)
+            .map_err(WalletError::Operation)?;
+        let bitcoin_testnet = taurvia_bitcoin::derive_from_seed(seed.as_slice(), true)
+            .map_err(WalletError::Operation)?;
+        Ok(Self {
+            solana,
+            evm,
+            bitcoin,
+            bitcoin_testnet,
+        })
+    }
+
+    pub fn address(&self, family: ChainFamily, testnet: bool) -> String {
+        match family {
+            ChainFamily::Solana => self.solana.pubkey().to_string(),
+            ChainFamily::Evm => self.evm.address.clone(),
+            ChainFamily::Bitcoin => {
+                if testnet {
+                    self.bitcoin_testnet.address.clone()
+                } else {
+                    self.bitcoin.address.clone()
+                }
+            }
+            ChainFamily::Sui => String::new(),
+        }
+    }
+
+    pub fn btc(&self, testnet: bool) -> &taurvia_bitcoin::BtcSigner {
+        if testnet {
+            &self.bitcoin_testnet
+        } else {
+            &self.bitcoin
+        }
+    }
+}
+
+impl Drop for FamilyKeyring {
+    fn drop(&mut self) {
+        // EVM / Bitcoin secrets are `Zeroizing`. Best-effort wipe of the Solana key copy.
+        let mut bytes = self.solana.to_bytes();
+        bytes.zeroize();
+    }
+}
 
 pub(crate) struct WalletSession {
-    pub public_key: String,
-    pub keypair: Keypair,
+    pub keyring: FamilyKeyring,
 }
 
 pub struct WalletService {
@@ -18,6 +93,8 @@ pub struct WalletService {
     pub(crate) session: Arc<Mutex<Option<WalletSession>>>,
     pub(crate) cached_wallet: Mutex<Option<WalletFile>>,
     pub(crate) rpc: Mutex<SolanaRpc>,
+    pub(crate) evm_rpc_url: Mutex<String>,
+    pub(crate) btc_esplora: Mutex<String>,
     pub(crate) device_secrets: DeviceSecretStore,
 }
 
@@ -65,13 +142,16 @@ impl WalletService {
         device_secrets: DeviceSecretStore,
     ) -> Self {
         configure_jupiter_api_key(runtime.jupiter_api_key.clone());
+        let (sol_rpc, evm_url, btc_url) = split_runtime(&settings, &runtime);
         Self {
             storage,
             config_store,
             settings: Mutex::new(settings),
             session: Arc::new(Mutex::new(None)),
             cached_wallet: Mutex::new(None),
-            rpc: Mutex::new(SolanaRpc::new(Some(&runtime.rpc_url))),
+            rpc: Mutex::new(SolanaRpc::new(Some(&sol_rpc))),
+            evm_rpc_url: Mutex::new(evm_url),
+            btc_esplora: Mutex::new(btc_url),
             device_secrets,
         }
     }
@@ -83,33 +163,47 @@ impl WalletService {
     pub fn update_settings(&self, settings: AppSettings) -> Result<RuntimeConfig, WalletError> {
         let prev = self.settings.lock().unwrap().clone();
         let mut settings = settings;
+        settings.network = normalize_network_id(&settings.network).to_string();
         if self.storage.exists() {
-            settings.network = Network::parse(&self.wallet_network());
+            settings.network = normalize_network_id(&self.wallet_network()).to_string();
         }
         self.config_store.save(&settings)?;
         *self.settings.lock().unwrap() = settings.clone();
         let runtime = RuntimeConfig::resolve(&settings);
         let connectivity_changed = prev.rpc_url != settings.rpc_url
+            || prev.rpc_urls != settings.rpc_urls
             || prev.jupiter_api_key != settings.jupiter_api_key
             || prev.network != settings.network;
         if connectivity_changed {
             configure_jupiter_api_key(runtime.jupiter_api_key.clone());
-            *self.rpc.lock().unwrap() = SolanaRpc::new(Some(&runtime.rpc_url));
+            let (sol_rpc, evm_url, btc_url) = split_runtime(&settings, &runtime);
+            *self.rpc.lock().unwrap() = SolanaRpc::new(Some(&sol_rpc));
+            *self.evm_rpc_url.lock().unwrap() = evm_url;
+            *self.btc_esplora.lock().unwrap() = btc_url;
         }
         Ok(runtime)
     }
 
     pub fn wallet_network(&self) -> String {
         if let Some(wallet) = self.cached_wallet.lock().unwrap().as_ref() {
-            return wallet.network.clone();
+            return normalize_network_id(&wallet.network).to_string();
         }
         self.storage
             .load()
-            .map(|w| w.network)
-            .unwrap_or_else(|_| Network::SolanaMainnet.as_str().to_string())
+            .map(|w| normalize_network_id(&w.network).to_string())
+            .unwrap_or_else(|_| DEFAULT_NETWORK_ID.to_string())
     }
 
-    pub fn change_network(&self, network: Network) -> Result<RuntimeConfig, WalletError> {
+    pub fn change_network(&self, network: &str) -> Result<RuntimeConfig, WalletError> {
+        let id = normalize_network_id(network);
+        let desc = require_network(id);
+        if !desc.enabled {
+            return Err(WalletError::Operation(anyhow::anyhow!(
+                "{} is not enabled yet",
+                desc.name
+            )));
+        }
+
         let wallet = self
             .cached_wallet
             .lock()
@@ -119,18 +213,23 @@ impl WalletService {
             .ok_or(WalletError::NotFound)?;
 
         let mut updated = wallet;
-        updated.network = network.as_str().to_string();
+        updated.network = id.to_string();
         self.storage.save(&updated)?;
         *self.cached_wallet.lock().unwrap() = Some(updated);
 
         let mut settings = self.get_settings();
-        settings.network = network;
+        settings.network = id.to_string();
         settings.rpc_url = None;
+        settings.rpc_urls.remove(id);
         self.update_settings(settings)
     }
 
     pub(crate) fn rpc_handle(&self) -> SolanaRpc {
         self.rpc.lock().unwrap().clone()
+    }
+
+    pub(crate) fn active_descriptor(&self) -> &'static models::NetworkDescriptor {
+        require_network(&self.wallet_network())
     }
 
     pub fn wallet_exists(&self) -> bool {
@@ -142,10 +241,18 @@ impl WalletService {
     }
 
     pub fn get_public_key(&self) -> Option<String> {
+        let desc = self.active_descriptor();
         if let Some(session) = self.session.lock().unwrap().as_ref() {
-            return Some(session.public_key.clone());
+            return Some(session.keyring.address(desc.family, desc.is_testnet));
         }
-        self.storage.load().ok().map(|w| w.public_key)
+        let wallet = self.cached_wallet.lock().unwrap().clone().or_else(|| self.storage.load().ok())?;
+        if let Some(addr) = wallet.addresses.get(desc.family) {
+            return Some(addr.to_string());
+        }
+        if desc.family == ChainFamily::Solana {
+            return Some(wallet.public_key);
+        }
+        None
     }
 
     pub fn lock(&self) {
@@ -157,12 +264,56 @@ impl WalletService {
     pub(crate) fn signing_keypair(&self) -> Result<Keypair, WalletError> {
         let session = self.session.lock().unwrap();
         let session = session.as_ref().ok_or(WalletError::Locked)?;
-        Keypair::try_from(session.keypair.to_bytes().as_slice()).map_err(|_| WalletError::Locked)
+        Keypair::try_from(session.keyring.solana.to_bytes().as_slice())
+            .map_err(|_| WalletError::Locked)
     }
 
     pub(crate) fn require_pubkey(&self) -> Result<Pubkey, WalletError> {
         let session = self.session.lock().unwrap();
         let session = session.as_ref().ok_or(WalletError::Locked)?;
-        Ok(session.keypair.pubkey())
+        Ok(session.keyring.solana.pubkey())
     }
+
+    pub(crate) fn with_session<T>(
+        &self,
+        f: impl FnOnce(&FamilyKeyring) -> T,
+    ) -> Result<T, WalletError> {
+        let session = self.session.lock().unwrap();
+        let session = session.as_ref().ok_or(WalletError::Locked)?;
+        Ok(f(&session.keyring))
+    }
+
+    pub fn list_networks(&self) -> Vec<models::NetworkInfo> {
+        models::list_network_info(false)
+    }
+}
+
+fn split_runtime(settings: &AppSettings, runtime: &RuntimeConfig) -> (String, String, String) {
+    let desc = require_network(&settings.network);
+    let sol = if desc.family == ChainFamily::Solana {
+        runtime.rpc_url.clone()
+    } else {
+        settings
+            .rpc_urls
+            .get(models::NETWORK_SOLANA_MAINNET)
+            .cloned()
+            .or_else(|| settings.rpc_url.clone())
+            .filter(|s| !s.trim().is_empty())
+            .unwrap_or_else(|| models::MANAGED_DEFAULT_RPC_URL.to_string())
+    };
+    let evm = if desc.family == ChainFamily::Evm {
+        runtime.rpc_url.clone()
+    } else {
+        require_network(models::NETWORK_ETHEREUM_MAINNET)
+            .default_rpc
+            .to_string()
+    };
+    let btc = if desc.family == ChainFamily::Bitcoin {
+        runtime.rpc_url.clone()
+    } else {
+        require_network(models::NETWORK_BITCOIN_MAINNET)
+            .default_rpc
+            .to_string()
+    };
+    (sol, evm, btc)
 }

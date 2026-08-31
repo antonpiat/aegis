@@ -1,0 +1,11 @@
+[package]
+name = "taurvia-hd"
+version = "0.4.3"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+bip39.workspace = true
+rand.workspace = true
+zeroize.workspace = true

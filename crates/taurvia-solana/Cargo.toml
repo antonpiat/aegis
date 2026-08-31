@@ -6,9 +6,9 @@ license.workspace = true
 
 [dependencies]
 models = { path = "../models" }
+taurvia-hd = { path = "../taurvia-hd" }
 anyhow.workspace = true
 base64.workspace = true
-bip39.workspace = true
 rand.workspace = true
 solana-account-decoder = { version = "4.1.1", features = ["agave-unstable-api"] }
 solana-client.workspace = true

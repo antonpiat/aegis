@@ -18,7 +18,7 @@ import { Label } from "@/components/ui/label";
 import { Alert } from "@/components/ui/misc";
 import { useWallet } from "@/context/WalletContext";
 import { txExplorerUrl } from "@/lib/explorer";
-import { isMainnet } from "@/lib/network";
+import { canSwap } from "@/lib/network";
 import {
   MAJOR_TOKENS,
   MAX_SWAP_FAVORITES,
@@ -45,7 +45,7 @@ function looksLikeMintSymbol(symbol: string | null | undefined): boolean {
 
 export function SwapPage() {
   const navigate = useNavigate();
-  const { solBalance, tokens, refreshBalances, settings, saveSettings, explorer, network } = useWallet();
+  const { solBalance, tokens, refreshBalances, settings, saveSettings, explorer, network, networkInfo } = useWallet();
   const [fromMint, setFromMint] = useState(WRAPPED_SOL);
   const [toMint, setToMint] = useState("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
   const [amount, setAmount] = useState("");
@@ -298,7 +298,8 @@ export function SwapPage() {
     slippageBps % 100 === 0 ? 1 : 2,
   )}%`;
 
-  if (!isMainnet(network)) {
+  if (!canSwap(networkInfo)) {
+    const onSolanaTestnet = networkInfo?.family === "solana" && networkInfo.is_testnet;
     return (
       <div className="space-y-4 sm:space-y-6">
         <PageHeader
@@ -308,8 +309,9 @@ export function SwapPage() {
         <Card>
           <CardContent className="space-y-3 pt-6">
             <p className="text-sm text-muted-foreground">
-              You are on Devnet. Switch to Mainnet in Settings → Network to use Swap.
-              Send and Receive still work on Devnet.
+              {onSolanaTestnet
+                ? "You are on Devnet. Switch to Solana Mainnet in Settings → Network to use Swap. Send and Receive still work on Devnet."
+                : `Swap is not available on ${networkInfo?.name ?? "this network"}. Switch to Solana Mainnet in Settings → Network.`}
             </p>
             <Button variant="outline" onClick={() => navigate("/settings/network")}>
               Open Network settings

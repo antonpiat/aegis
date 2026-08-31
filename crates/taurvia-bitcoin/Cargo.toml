@@ -1,0 +1,19 @@
+[package]
+name = "taurvia-bitcoin"
+version = "0.4.3"
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+models = { path = "../models" }
+taurvia-chain = { path = "../taurvia-chain" }
+anyhow.workspace = true
+bitcoin.workspace = true
+bip32.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+zeroize.workspace = true
+tokio.workspace = true
+
+[dev-dependencies]
+taurvia-hd = { path = "../taurvia-hd" }
