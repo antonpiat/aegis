@@ -231,35 +231,41 @@ jobs:
           ls -la dist
           test -n "$(ls -A dist)"
 
-      - name: Upload ${{ matrix.platform }} installers
-        uses: actions/upload-artifact@v6
-        with:
-          name: installers-${{ matrix.platform }}
-          path: dist/*
-          if-no-files-found: error
-          compression-level: 0
+      - name: Attach ${{ matrix.platform }} installers to draft
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.gate.outputs.tag }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(dist/*)
+          if [ ${#files[@]} -eq 0 ]; then
+            echo "dist/ is empty"
+            exit 1
+          fi
+          gh release upload "$TAG" "${files[@]}" --clobber
 
   publish:
     name: Publish GitHub Release
     needs: [gate, build]
     runs-on: ubuntu-latest
     steps:
-      - name: Download Linux, Windows, and macOS installers
-        uses: actions/download-artifact@v7
-        with:
-          pattern: installers-*
-          merge-multiple: true
-          path: dist
+      # Stay draft until every OS job succeeded. Uploads already landed on the draft.
+      - name: Confirm Linux, Windows, and macOS assets
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.gate.outputs.tag }}
+        run: |
+          set -euo pipefail
+          names=$(gh release view "$TAG" --json assets --jq '.assets[].name')
+          echo "$names"
+          echo "$names" | grep -Eq '\.(AppImage|deb|rpm)$' || { echo "missing Linux installer"; exit 1; }
+          echo "$names" | grep -Eq '\.(msi|exe)$' || { echo "missing Windows installer"; exit 1; }
+          echo "$names" | grep -Eq '\.(dmg|app\.tar\.gz)$' || { echo "missing macOS installer"; exit 1; }
 
-      - name: List release assets
-        run: ls -la dist
-
-      # v3 runs on Node 24 (v2 is Node 20 and GitHub forces it onto 24 with a warning).
-      - name: Upload assets and publish
-        uses: softprops/action-gh-release@v3
-        with:
-          tag_name: ${{ needs.gate.outputs.tag }}
-          name: Taurvia ${{ needs.gate.outputs.tag }}
-          draft: false
-          fail_on_unmatched_files: true
-          files: dist/*
+      - name: Mark release as published
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ needs.gate.outputs.tag }}
+        run: gh release edit "$TAG" --draft=false
