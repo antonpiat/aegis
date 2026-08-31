@@ -27,10 +27,6 @@ export function enabledNetworks(networks: NetworkInfo[]): NetworkInfo[] {
   return networks.filter((n) => n.enabled);
 }
 
-export function isMainnet(info: NetworkInfo | undefined): boolean {
-  return Boolean(info && !info.is_testnet);
-}
-
 export function canSwap(info: NetworkInfo | undefined): boolean {
   return Boolean(info?.features.swap && !info.is_testnet);
 }

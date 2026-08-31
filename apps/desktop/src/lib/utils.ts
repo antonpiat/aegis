@@ -15,10 +15,6 @@ export function formatNative(amount: number, symbol: string): string {
   return `${amount.toFixed(digits)} ${symbol}`;
 }
 
-export function formatSol(amount: number): string {
-  return formatNative(amount, "SOL");
-}
-
 export function formatUsd(amount: number | null | undefined): string {
   if (amount === null || amount === undefined || Number.isNaN(amount)) {
     return "—";

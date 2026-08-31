@@ -43,10 +43,6 @@ interface WalletContextValue {
   nativeSymbol: string;
   nativePriceUsd: number | null;
   nativeValueUsd: number | null;
-  /** Alias for Solana swap UI. */
-  solBalance: number | null;
-  solPriceUsd: number | null;
-  solValueUsd: number | null;
   totalPortfolioUsd: number | null;
   tokens: TokenBalance[];
   settings: AppSettings;
@@ -56,7 +52,6 @@ interface WalletContextValue {
   refreshBalances: () => Promise<void>;
   unlock: (password: string) => Promise<void>;
   lock: () => Promise<void>;
-  reloadSettings: () => Promise<AppSettings>;
   saveSettings: (next: AppSettings) => Promise<RuntimeConfig>;
   setHideBalances: (hidden: boolean) => Promise<void>;
   changeNetwork: (network: string) => Promise<RuntimeConfig>;
@@ -180,7 +175,15 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
 
   const setHideBalances = useCallback(
     async (hidden: boolean) => {
-      await saveSettings({ ...settingsRef.current, hide_balances: hidden });
+      const previous = settingsRef.current;
+      const next = { ...previous, hide_balances: hidden };
+      setSettings(next);
+      try {
+        await saveSettings(next);
+      } catch (err) {
+        setSettings(previous);
+        throw err;
+      }
     },
     [saveSettings],
   );
@@ -285,18 +288,12 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setWalletExists(true);
       setUnlocked(true);
       setPublicKey(key);
-      setNativeBalance(null);
-      setNativePriceUsd(null);
-      setNativeValueUsd(null);
-      setTotalPortfolioUsd(null);
-      setTokens([]);
       void refresh();
     },
     [refresh],
   );
 
   const networkInfo = useMemo(() => findNetwork(networks, network), [networks, network]);
-  const solanaNative = networkInfo?.family === "solana" ? nativeBalance : null;
 
   const value = useMemo(
     () => ({
@@ -312,9 +309,6 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       nativeSymbol,
       nativePriceUsd,
       nativeValueUsd,
-      solBalance: solanaNative,
-      solPriceUsd: networkInfo?.family === "solana" ? nativePriceUsd : null,
-      solValueUsd: networkInfo?.family === "solana" ? nativeValueUsd : null,
       totalPortfolioUsd,
       tokens,
       settings,
@@ -324,7 +318,6 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       refreshBalances,
       unlock,
       lock,
-      reloadSettings,
       saveSettings,
       setHideBalances,
       changeNetwork,
@@ -342,7 +335,6 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       nativeSymbol,
       nativePriceUsd,
       nativeValueUsd,
-      solanaNative,
       totalPortfolioUsd,
       tokens,
       settings,
@@ -350,7 +342,6 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       refreshBalances,
       unlock,
       lock,
-      reloadSettings,
       saveSettings,
       setHideBalances,
       changeNetwork,

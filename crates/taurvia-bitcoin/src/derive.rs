@@ -2,10 +2,16 @@ use anyhow::{anyhow, bail, Result};
 use bitcoin::secp256k1::Secp256k1;
 use bitcoin::{Address, CompressedPublicKey, Network, PrivateKey};
 use std::str::FromStr;
+use std::sync::OnceLock;
 use zeroize::Zeroizing;
 
-pub const BITCOIN_MAINNET_PATH: &str = "m/84'/0'/0'/0/0";
-pub const BITCOIN_TESTNET_PATH: &str = "m/84'/1'/0'/0/0";
+const BITCOIN_MAINNET_PATH: &str = "m/84'/0'/0'/0/0";
+const BITCOIN_TESTNET_PATH: &str = "m/84'/1'/0'/0/0";
+
+pub(crate) fn secp() -> &'static Secp256k1<bitcoin::secp256k1::All> {
+    static SECP: OnceLock<Secp256k1<bitcoin::secp256k1::All>> = OnceLock::new();
+    SECP.get_or_init(Secp256k1::new)
+}
 
 #[derive(Clone)]
 pub struct BtcSigner {
@@ -40,13 +46,13 @@ pub fn derive_from_seed(seed: &[u8], testnet: bool) -> Result<BtcSigner> {
         .map_err(|e| anyhow!("bitcoin derivation: {e}"))?;
     let mut secret = Zeroizing::new([0u8; 32]);
     secret.copy_from_slice(xprv.private_key().to_bytes().as_slice());
-    let secp = Secp256k1::new();
+    let secp = secp();
     let privkey = {
         let sk = bitcoin::secp256k1::SecretKey::from_slice(secret.as_slice())
             .map_err(|e| anyhow!("invalid bitcoin key: {e}"))?;
         PrivateKey::new(sk, network)
     };
-    let compressed = CompressedPublicKey::from_private_key(&secp, &privkey)
+    let compressed = CompressedPublicKey::from_private_key(secp, &privkey)
         .map_err(|e| anyhow!("bitcoin pubkey: {e}"))?;
     let address = Address::p2wpkh(&compressed, network);
     Ok(BtcSigner {
@@ -90,8 +96,7 @@ mod tests {
         .unwrap();
         let signer = derive_from_seed(seed.as_slice(), false).unwrap();
         let pk = signer.private_key().unwrap();
-        let secp = bitcoin::secp256k1::Secp256k1::new();
-        let compressed = bitcoin::CompressedPublicKey::from_private_key(&secp, &pk).unwrap();
+        let compressed = bitcoin::CompressedPublicKey::from_private_key(secp(), &pk).unwrap();
         assert_eq!(
             format!("{compressed}"),
             "0330d54fd0dd420a6e5f8d3624f5f3482cae350f79d5f0753bf5beef9c2d91af3c"

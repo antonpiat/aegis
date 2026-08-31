@@ -72,9 +72,10 @@ jobs:
             exit 1
           fi
 
-          echo "Waiting for a successful CI run on $SHA"
-          deadline=$((SECONDS + 1200))
-          while [ "$SECONDS" -lt "$deadline" ]; do
+          echo "Checking for a successful CI run on $SHA"
+          # Tag after CI is green. Brief retry only covers the race where CI
+          # just finished; do not sit here for a full CI cycle.
+          for i in 1 2 3 4 5; do
             JSON=$(gh run list --workflow ci.yml --commit "$SHA" --limit 20 --json conclusion,status)
             echo "$JSON"
 
@@ -86,26 +87,35 @@ jobs:
             fi
 
             in_flight=$(echo "$JSON" | jq '[.[] | select(.status == "in_progress" or .status == "queued" or .status == "pending" or .status == "waiting" or .status == "requested")] | length')
-            failed=$(echo "$JSON" | jq '[.[] | select(.conclusion == "failure" or .conclusion == "cancelled" or .conclusion == "timed_out")] | length')
-
-            if [ "$in_flight" = "0" ] && [ "$failed" != "0" ]; then
-              echo "CI did not succeed on $SHA"
-              exit 1
+            if [ "$in_flight" != "0" ]; then
+              echo "CI still running; retry $i/5"
+              sleep 20
+              continue
             fi
 
-            if [ "$JSON" = "[]" ]; then
-              echo "No CI run found yet for $SHA"
-            fi
-            sleep 30
+            echo "No successful CI run on $SHA. Wait for CI on main, then re-run Release."
+            exit 1
           done
 
-          echo "Timed out waiting for a successful CI run on $SHA"
+          echo "Timed out waiting for CI on $SHA"
           exit 1
+
+      - name: Create draft GitHub Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ steps.tag.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+          else
+            gh release create "$TAG" --draft --title "Taurvia $TAG" --generate-notes
+          fi
 
   build:
     name: Package ${{ matrix.platform }}
     needs: gate
-    environment: release
+    # Signing later: add `environment: release` here and set Apple/Windows secrets
+    # on that environment. Do not enable it until then — it can queue the job.
     strategy:
       fail-fast: false
       matrix:
@@ -127,12 +137,16 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y \
+          sudo apt-get install -y --no-install-recommends \
             libwebkit2gtk-4.1-dev \
             libappindicator3-dev \
             librsvg2-dev \
             patchelf \
             libssl-dev
+
+      - name: Install mold
+        if: matrix.platform == 'linux'
+        uses: rui314/setup-mold@v1
 
       # Prefer Corepack over pnpm/action-setup: standalone mode crashes while
       # switching versions (integrity undefined), and the npm self-installer
@@ -166,17 +180,20 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Rust cache
+      - name: Cargo registry cache
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
+          shared-key: release-${{ matrix.platform }}
+          # Release objects are multi-GB; caching them is slower than a compile
+          # on an infrequent tag. Registry/git cache still helps crate downloads.
+          cache-targets: false
 
       - name: Install frontend dependencies
         working-directory: apps/desktop
         run: pnpm install --frozen-lockfile
 
-      # Unsigned until secrets exist on the `release` environment.
-      # When ready, drop the unsigned suffix and set:
+      # Unsigned until Apple/Windows secrets exist. Then:
       #   Apple: APPLE_CERTIFICATE, APPLE_CERTIFICATE_PASSWORD, APPLE_SIGNING_IDENTITY,
       #          APPLE_ID, APPLE_PASSWORD, APPLE_TEAM_ID
       #   Windows: see https://v2.tauri.app/distribute/sign/windows/
@@ -186,52 +203,63 @@ jobs:
         working-directory: apps/desktop
         run: pnpm tauri build
 
-      - name: Upload Linux artifacts
-        if: matrix.platform == 'linux'
-        uses: actions/upload-artifact@v7
-        with:
-          name: taurvia-linux-unsigned-${{ needs.gate.outputs.version }}
-          path: |
-            target/release/bundle/appimage/*.AppImage
-            target/release/bundle/deb/*.deb
-            target/release/bundle/rpm/*.rpm
-          if-no-files-found: error
+      # Workspace member, so Cargo writes to repo-root target/. Fall back to
+      # src-tauri/target if Tauri ever isolates the crate.
+      - name: Collect installers
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p dist
+          found=0
+          for bundle in target/release/bundle apps/desktop/src-tauri/target/release/bundle; do
+            if [ ! -d "$bundle" ]; then
+              continue
+            fi
+            found=1
+            find "$bundle" -type f \( \
+              -name '*.AppImage' -o -name '*.deb' -o -name '*.rpm' \
+              -o -name '*.msi' -o -name '*.exe' -o -name '*.dmg' \
+              -o -name '*.app.tar.gz' -o -name '*.sig' \
+            \) -exec cp -v {} dist/ \;
+          done
+          if [ "$found" -eq 0 ]; then
+            echo "No bundle directory. Listing target/release:"
+            find target/release -maxdepth 3 -type d || true
+            exit 1
+          fi
+          echo "Collected:"
+          ls -la dist
+          test -n "$(ls -A dist)"
 
-      - name: Upload Windows artifacts
-        if: matrix.platform == 'windows'
-        uses: actions/upload-artifact@v7
+      - name: Upload ${{ matrix.platform }} installers
+        uses: actions/upload-artifact@v6
         with:
-          name: taurvia-windows-unsigned-${{ needs.gate.outputs.version }}
-          path: |
-            target/release/bundle/msi/*.msi
-            target/release/bundle/nsis/*.exe
+          name: installers-${{ matrix.platform }}
+          path: dist/*
           if-no-files-found: error
-
-      - name: Upload macOS artifacts
-        if: matrix.platform == 'macos'
-        uses: actions/upload-artifact@v7
-        with:
-          name: taurvia-macos-unsigned-${{ needs.gate.outputs.version }}
-          path: |
-            target/release/bundle/dmg/*.dmg
-          if-no-files-found: error
+          compression-level: 0
 
   publish:
-    name: GitHub Release
+    name: Publish GitHub Release
     needs: [gate, build]
     runs-on: ubuntu-latest
     steps:
-      - name: Download artifacts
+      - name: Download Linux, Windows, and macOS installers
         uses: actions/download-artifact@v7
         with:
-          path: dist
+          pattern: installers-*
           merge-multiple: true
+          path: dist
 
-      - name: Publish GitHub Release
-        uses: softprops/action-gh-release@v2
+      - name: List release assets
+        run: ls -la dist
+
+      # v3 runs on Node 24 (v2 is Node 20 and GitHub forces it onto 24 with a warning).
+      - name: Upload assets and publish
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ needs.gate.outputs.tag }}
           name: Taurvia ${{ needs.gate.outputs.tag }}
-          generate_release_notes: true
+          draft: false
           fail_on_unmatched_files: true
           files: dist/*

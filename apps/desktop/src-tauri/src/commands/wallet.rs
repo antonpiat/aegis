@@ -110,15 +110,6 @@ pub fn disable_device_protection(
 
 #[tauri::command]
 #[specta::specta]
-pub fn remove_wallet(password: String, state: State<'_, AppState>) -> CommandResult<()> {
-    state
-        .wallet
-        .remove_wallet(&password)
-        .map_err(map_wallet_error)
-}
-
-#[tauri::command]
-#[specta::specta]
 pub fn reset_local_wallet(state: State<'_, AppState>) -> CommandResult<()> {
     state.wallet.reset_local_wallet().map_err(map_wallet_error)
 }
@@ -133,15 +124,6 @@ pub fn change_wallet_password(
     state
         .wallet
         .change_password(&old_password, &new_password)
-        .map_err(map_wallet_error)
-}
-
-#[tauri::command]
-#[specta::specta]
-pub fn export_wallet(password: String, state: State<'_, AppState>) -> CommandResult<String> {
-    state
-        .wallet
-        .export_wallet(&password)
         .map_err(map_wallet_error)
 }
 

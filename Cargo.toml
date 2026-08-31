@@ -38,7 +38,6 @@ hex = "0.4.3"
 k256 = { version = "0.13.4", features = ["ecdsa"] }
 sha3 = "0.10.8"
 bitcoin = { version = "0.32.7", default-features = false, features = ["std", "rand-std"] }
-async-trait = "0.1.89"
 solana-sdk = "4.0.1"
 solana-client = "4.1.2"
 solana-commitment-config = "3.1.1"

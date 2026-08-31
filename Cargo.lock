@@ -9817,9 +9817,6 @@ dependencies = [
  "moka",
  "reqwest 0.13.4",
  "serde",
- "serde_json",
- "thiserror 2.0.20",
- "tokio",
 ]
 
 [[package]]
@@ -9877,7 +9874,6 @@ dependencies = [
  "futures",
  "models",
  "moka",
- "rand 0.10.2",
  "reqwest 0.13.4",
  "serde",
  "serde_json",

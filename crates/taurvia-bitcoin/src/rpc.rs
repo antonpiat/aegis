@@ -2,7 +2,7 @@ use anyhow::{anyhow, bail, Context, Result};
 use bitcoin::absolute::LockTime;
 use bitcoin::consensus::encode::serialize_hex;
 use bitcoin::hashes::Hash;
-use bitcoin::secp256k1::{Message, Secp256k1};
+use bitcoin::secp256k1::Message;
 use bitcoin::sighash::{EcdsaSighashType, SighashCache};
 use bitcoin::{
     Address, Amount, CompressedPublicKey, OutPoint, ScriptBuf, Sequence, Transaction, TxIn, TxOut,
@@ -15,7 +15,7 @@ use serde::Deserialize;
 use std::str::FromStr;
 use std::time::Duration;
 
-use crate::derive::{validate_address, BtcSigner};
+use crate::derive::{secp, validate_address, BtcSigner};
 
 const SATS_PER_BTC: f64 = 100_000_000.0;
 const MARKET_DATA_BUDGET: Duration = Duration::from_secs(4);
@@ -75,24 +75,25 @@ impl BtcRpc {
         }
     }
 
-    pub async fn snapshot(&self, signer: &BtcSigner) -> Result<WalletSnapshot> {
-        let utxos = self.utxos(&signer.address).await.unwrap_or_default();
+    pub async fn snapshot(&self, address: &str) -> Result<WalletSnapshot> {
+        let price_id = self.descriptor.coingecko_id.unwrap_or("bitcoin");
+        let (utxos, price) = tokio::join!(
+            self.utxos(address),
+            tokio::time::timeout(
+                MARKET_DATA_BUDGET,
+                taurvia_chain::native_price_usd(price_id),
+            ),
+        );
+        let utxos = utxos.unwrap_or_default();
         let sats: u64 = utxos.iter().map(|u| u.value).sum();
         let native_balance = sats as f64 / SATS_PER_BTC;
-        let price_id = self.descriptor.coingecko_id.unwrap_or("bitcoin");
-        let native_price_usd = tokio::time::timeout(
-            MARKET_DATA_BUDGET,
-            taurvia_chain::native_price_usd(price_id),
-        )
-        .await
-        .ok()
-        .and_then(|r| r.ok());
+        let native_price_usd = price.ok().and_then(|r| r.ok());
         let native_value_usd = native_price_usd.map(|p| p * native_balance);
         Ok(WalletSnapshot {
             exists: true,
             unlocked: true,
             network: self.descriptor.id.to_string(),
-            public_key: Some(signer.address.clone()),
+            public_key: Some(address.to_string()),
             native_balance: Some(native_balance),
             native_symbol: self.descriptor.native_symbol.to_string(),
             native_price_usd,
@@ -102,8 +103,8 @@ impl BtcRpc {
         })
     }
 
-    pub async fn activity(&self, signer: &BtcSigner, limit: usize) -> Result<Vec<ActivityItem>> {
-        let url = format!("{}/address/{}/txs", self.esplora, signer.address);
+    pub async fn activity(&self, address: &str, limit: usize) -> Result<Vec<ActivityItem>> {
+        let url = format!("{}/address/{}/txs", self.esplora, address);
         let txs: Vec<EsploraTx> = taurvia_chain::http_client()
             .get(url)
             .send()
@@ -114,7 +115,7 @@ impl BtcRpc {
             .json()
             .await
             .context("esplora txs json")?;
-        let me = signer.address.to_lowercase();
+        let me = address.to_lowercase();
         Ok(txs
             .into_iter()
             .take(limit.clamp(1, 25))
@@ -175,13 +176,14 @@ impl BtcRpc {
 
     pub async fn preview_send(
         &self,
-        signer: &BtcSigner,
+        from: &str,
         to: &str,
         amount_btc: f64,
     ) -> Result<SendPreview> {
-        let (_tx, fee_sats) = self.build_signed(signer, to, amount_btc).await?;
+        let (_selected, fee_sats, _change, _send_sats) =
+            self.select_coins(from, to, amount_btc).await?;
         Ok(SendPreview {
-            from: signer.address.clone(),
+            from: from.to_string(),
             to: to.to_string(),
             token: "BTC".into(),
             amount: format!("{amount_btc}"),
@@ -252,21 +254,22 @@ impl BtcRpc {
         Ok(rate.max(1.0))
     }
 
-    async fn build_signed(
+    async fn select_coins(
         &self,
-        signer: &BtcSigner,
+        from: &str,
         to: &str,
         amount_btc: f64,
-    ) -> Result<(Transaction, u64)> {
+    ) -> Result<(Vec<EsploraUtxo>, u64, u64, u64)> {
         validate_address(to, self.descriptor.is_testnet)?;
         if amount_btc <= 0.0 {
             bail!("amount must be positive");
         }
         let send_sats = (amount_btc * SATS_PER_BTC).round() as u64;
-        let mut utxos = self.utxos(&signer.address).await?;
+        let (utxos, fee_rate) = tokio::join!(self.utxos(from), self.fee_rate_sat_vb());
+        let mut utxos = utxos?;
+        let fee_rate = fee_rate?;
         utxos.retain(|u| u.status.confirmed);
         utxos.sort_by_key(|u| std::cmp::Reverse(u.value));
-        let fee_rate = self.fee_rate_sat_vb().await?;
 
         let mut selected = Vec::new();
         let mut total = 0u64;
@@ -274,7 +277,8 @@ impl BtcRpc {
         for utxo in utxos {
             selected.push(utxo);
             total = selected.iter().map(|u| u.value).sum();
-            let vbytes = OVERHEAD_VBYTES + INPUT_VBYTES * selected.len() as f64 + OUTPUT_VBYTES * 2.0;
+            let vbytes =
+                OVERHEAD_VBYTES + INPUT_VBYTES * selected.len() as f64 + OUTPUT_VBYTES * 2.0;
             fee = (vbytes * fee_rate).ceil() as u64;
             if total >= send_sats.saturating_add(fee) {
                 break;
@@ -284,6 +288,17 @@ impl BtcRpc {
             bail!("insufficient Bitcoin balance");
         }
         let change = total - send_sats - fee;
+        Ok((selected, fee, change, send_sats))
+    }
+
+    async fn build_signed(
+        &self,
+        signer: &BtcSigner,
+        to: &str,
+        amount_btc: f64,
+    ) -> Result<(Transaction, u64)> {
+        let (selected, fee, change, send_sats) =
+            self.select_coins(&signer.address, to, amount_btc).await?;
 
         let dest: Address = Address::from_str(to)
             .map_err(|e| anyhow!("invalid recipient: {e}"))?
@@ -304,7 +319,7 @@ impl BtcRpc {
             });
         }
 
-        let mut tx = Transaction {
+        let tx = Transaction {
             version: bitcoin::transaction::Version::TWO,
             lock_time: LockTime::ZERO,
             input: selected
@@ -322,13 +337,13 @@ impl BtcRpc {
             output: outputs,
         };
 
-        let secp = Secp256k1::new();
+        let secp = secp();
         let privkey = signer.private_key()?;
-        let compressed = CompressedPublicKey::from_private_key(&secp, &privkey)
+        let compressed = CompressedPublicKey::from_private_key(secp, &privkey)
             .map_err(|e| anyhow!("{e}"))?;
         let prev_script = Address::p2wpkh(&compressed, signer.network).script_pubkey();
 
-        let mut cache = SighashCache::new(&mut tx);
+        let mut cache = SighashCache::new(tx);
         for (index, utxo) in selected.iter().enumerate() {
             let sighash = cache
                 .p2wpkh_signature_hash(
@@ -351,7 +366,6 @@ impl BtcRpc {
                 .ok_or_else(|| anyhow!("missing witness"))?
                 .push(compressed.to_bytes());
         }
-        let signed = cache.into_transaction().clone();
-        Ok((signed, fee))
+        Ok((cache.into_transaction(), fee))
     }
 }

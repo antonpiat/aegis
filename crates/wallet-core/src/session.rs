@@ -282,10 +282,6 @@ impl WalletService {
         let session = session.as_ref().ok_or(WalletError::Locked)?;
         Ok(f(&session.keyring))
     }
-
-    pub fn list_networks(&self) -> Vec<models::NetworkInfo> {
-        models::list_network_info(false)
-    }
 }
 
 fn split_runtime(settings: &AppSettings, runtime: &RuntimeConfig) -> (String, String, String) {

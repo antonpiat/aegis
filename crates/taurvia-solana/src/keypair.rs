@@ -5,24 +5,11 @@ use solana_derivation_path::DerivationPath;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signer::keypair::keypair_from_seed_and_derivation_path;
 
-pub fn generate_mnemonic() -> Result<String> {
-    taurvia_hd::generate_mnemonic()
-}
-
-pub fn validate_mnemonic(mnemonic: &str) -> Result<()> {
-    taurvia_hd::validate_mnemonic(mnemonic)
-}
-
 pub fn derive_keypair_from_seed(seed: &[u8]) -> Result<Keypair> {
     let path = DerivationPath::from_absolute_path_str(DEFAULT_DERIVATION_PATH)
         .map_err(|e| anyhow!("invalid derivation path: {e}"))?;
     keypair_from_seed_and_derivation_path(seed, Some(path))
         .map_err(|e| anyhow!("key derivation failed: {e}"))
-}
-
-pub fn derive_keypair_from_mnemonic(mnemonic: &str) -> Result<Keypair> {
-    let seed = taurvia_hd::seed_from_mnemonic(mnemonic)?;
-    derive_keypair_from_seed(seed.as_slice())
 }
 
 pub fn keypair_to_base64(keypair: &Keypair) -> String {
@@ -52,6 +39,15 @@ mod tests {
             kp.pubkey().to_string(),
             "HAgk14JpMQLgt6rVgv7cBQFJWFto5Dqxi472uT3DKpqk"
         );
+    }
+
+    fn derive_keypair_from_mnemonic(mnemonic: &str) -> Result<Keypair> {
+        let seed = taurvia_hd::seed_from_mnemonic(mnemonic)?;
+        derive_keypair_from_seed(seed.as_slice())
+    }
+
+    fn generate_mnemonic() -> Result<String> {
+        taurvia_hd::generate_mnemonic()
     }
 
     #[test]

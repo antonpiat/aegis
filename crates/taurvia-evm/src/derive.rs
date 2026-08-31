@@ -4,7 +4,7 @@ use k256::elliptic_curve::sec1::ToEncodedPoint;
 use sha3::{Digest, Keccak256};
 use zeroize::Zeroizing;
 
-pub const EVM_DERIVATION_PATH: &str = "m/44'/60'/0'/0/0";
+const EVM_DERIVATION_PATH: &str = "m/44'/60'/0'/0/0";
 
 #[derive(Clone)]
 pub struct EvmSigner {
