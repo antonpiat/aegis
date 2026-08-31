@@ -17,7 +17,7 @@ import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/context/WalletContext";
 import { normalizeAppView, useLayoutMode, useSyncAppViewOnResize } from "@/lib/appView";
-import { networkShortLabel, productChainLabel, isMainnet } from "@/lib/network";
+import { canSwap, productChainLabel, networkShortLabel } from "@/lib/network";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTIONS,
@@ -42,6 +42,7 @@ export function MainLayout() {
     lock,
     hideBalances,
     network,
+    networkInfo,
     settings,
     saveSettings,
   } = useWallet();
@@ -49,9 +50,9 @@ export function MainLayout() {
   const isPhone = layout === "phone";
   const isCompact = layout === "compact";
   const isDesktop = layout === "desktop";
-  const networkLabel = networkShortLabel(network);
-  const chainLabel = productChainLabel(network);
-  const visibleNav = navItems.filter((item) => !item.mainnetOnly || isMainnet(network));
+  const networkLabel = networkShortLabel(networkInfo, network);
+  const chainLabel = productChainLabel(networkInfo);
+  const visibleNav = navItems.filter((item) => !item.mainnetOnly || canSwap(networkInfo));
   const [copied, setCopied] = useState(false);
   const [settingsExpanded, setSettingsExpanded] = useState(false);
   const wasOnSettings = useRef(false);

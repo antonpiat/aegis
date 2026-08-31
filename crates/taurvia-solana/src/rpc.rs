@@ -164,9 +164,10 @@ impl SolanaRpc {
             from: from.pubkey().to_string(),
             to: to_pubkey.to_string(),
             token: "SOL".into(),
-            amount: format!("{amount_sol} SOL"),
-            estimated_fee_lamports: fee,
-            estimated_fee_sol: crate::lamports_to_sol(fee),
+            amount: format!("{amount_sol}"),
+            network_name: "Solana".into(),
+            estimated_fee: crate::lamports_to_sol(fee),
+            fee_symbol: "SOL".into(),
             creates_token_account: false,
         })
     }
@@ -203,8 +204,9 @@ impl SolanaRpc {
             to: to_pubkey.to_string(),
             token: token_symbol,
             amount: format!("{amount}"),
-            estimated_fee_lamports: fee,
-            estimated_fee_sol: crate::lamports_to_sol(fee),
+            network_name: "Solana".into(),
+            estimated_fee: crate::lamports_to_sol(fee),
+            fee_symbol: "SOL".into(),
             creates_token_account,
         })
     }
@@ -344,7 +346,7 @@ impl SolanaRpc {
             .context("failed to confirm transaction")?;
 
         Ok(SendResult {
-            signature: signature.to_string(),
+            txid: signature.to_string(),
             status: "confirmed".into(),
         })
     }
@@ -364,7 +366,7 @@ async fn build_activity_item(
     .to_string();
 
     let timestamp = sig_info.block_time;
-    let mut amount_sol = None;
+    let mut amount = None;
     let mut description = "Transaction".to_string();
     let mut direction = "unknown".to_string();
 
@@ -387,7 +389,7 @@ async fn build_activity_item(
                     if idx < pre_balances.len() && idx < post_balances.len() {
                         let delta = post_balances[idx] as i64 - pre_balances[idx] as i64;
                         if delta != 0 {
-                            amount_sol = Some(crate::lamports_to_sol(delta.unsigned_abs()));
+                            amount = Some(crate::lamports_to_sol(delta.unsigned_abs()));
                             direction = if delta < 0 { "out".into() } else { "in".into() };
                             description = if delta < 0 {
                                 format!(
@@ -408,11 +410,12 @@ async fn build_activity_item(
     }
 
     ActivityItem {
-        signature,
+        txid: signature,
         timestamp,
         status,
         direction,
-        amount_sol,
+        amount,
+        amount_symbol: amount.map(|_| "SOL".into()),
         description,
     }
 }

@@ -2,7 +2,7 @@
 
 Version **0.4.3**. See the [root README](../../README.md) for architecture, setup, and security docs.
 
-Includes dashboard portfolio USD, token logos/prices, and a Jupiter-backed Swap page (`/swap`).
+Dashboard, send, receive, activity, and lock work on Solana, Ethereum, and Bitcoin. Jupiter Swap is Solana Mainnet only (`/swap`).
 
 ```bash
 pnpm install

@@ -16,7 +16,7 @@ export const SETTINGS_SECTIONS: Array<{
   { id: "wallet", label: "Wallet", hint: "Session & tokens" },
   { id: "security", label: "Security", hint: "Password & backup" },
   { id: "transactions", label: "Transactions", hint: "Slippage & explorer" },
-  { id: "network", label: "Network", hint: "Cluster & RPC" },
+  { id: "network", label: "Network", hint: "Network & RPC" },
   { id: "advanced", label: "Advanced", hint: "Overrides" },
   { id: "danger", label: "Danger zone", hint: "Remove wallet" },
 ];

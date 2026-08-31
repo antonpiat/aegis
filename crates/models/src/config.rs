@@ -1,26 +1,19 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
+use std::collections::HashMap;
 
-use crate::Network;
+use crate::{
+    env_rpc_override, managed_rpc_url, normalize_network_id, require_network, DEFAULT_NETWORK_ID,
+};
 
 /// Public / product default Solana mainnet RPC (no user setup required).
-/// Replace with a dedicated Taurvia-managed endpoint when product infra is ready.
-/// Never bake a personal developer `.env` URL into release builds.
 pub const MANAGED_DEFAULT_RPC_URL: &str = "https://api.mainnet-beta.solana.com";
 
-/// Public Solana devnet RPC used when `AppSettings.network` is Devnet.
+/// Public Solana devnet RPC used when network is Devnet.
 pub const MANAGED_DEVNET_RPC_URL: &str = "https://api.devnet.solana.com";
 
 pub const DEFAULT_AUTO_LOCK_MINUTES: u32 = 5;
 pub const DEFAULT_SLIPPAGE_BPS: u16 = 50;
-
-/// Managed RPC for a Solana cluster (before user/env overrides).
-pub fn managed_rpc_url(network: Network) -> &'static str {
-    match network {
-        Network::SolanaDevnet => MANAGED_DEVNET_RPC_URL,
-        Network::SolanaMainnet => MANAGED_DEFAULT_RPC_URL,
-    }
-}
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, Type, PartialEq, Eq, Default)]
 #[serde(rename_all = "camelCase")]
@@ -46,7 +39,6 @@ impl<'de> Deserialize<'de> for AppViewKind {
         Ok(match value.as_str() {
             "compact" => Self::Compact,
             "phone" => Self::Phone,
-            // "desktop", legacy "auto", or unknown → desktop
             _ => Self::Desktop,
         })
     }
@@ -80,15 +72,27 @@ fn default_swap_favorite_tokens() -> Vec<crate::TokenInfo> {
     Vec::new()
 }
 
+fn default_network() -> String {
+    DEFAULT_NETWORK_ID.to_string()
+}
+
+fn default_rpc_urls() -> HashMap<String, String> {
+    HashMap::new()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct AppSettings {
     /// Optional user override (Advanced). Empty / None = managed default for `network`.
+    /// Legacy single-URL field; treated as the Solana override when `rpc_urls` has no Solana key.
     pub rpc_url: Option<String>,
+    /// Per-network RPC / Esplora overrides. Keyed by network id.
+    #[serde(default = "default_rpc_urls")]
+    pub rpc_urls: HashMap<String, String>,
     /// Optional Jupiter portal key (Advanced). None = keyless.
     pub jupiter_api_key: Option<String>,
-    /// Active Solana cluster. Synced with `WalletFile.network` on switch.
-    #[serde(default)]
-    pub network: Network,
+    /// Active network id. Synced with `WalletFile.network` on switch.
+    #[serde(default = "default_network")]
+    pub network: String,
     /// Minutes of idle time before auto-lock. Defaults to 5. `0` disables.
     #[serde(
         default = "default_auto_lock_minutes",
@@ -120,8 +124,9 @@ impl Default for AppSettings {
     fn default() -> Self {
         Self {
             rpc_url: None,
+            rpc_urls: HashMap::new(),
             jupiter_api_key: None,
-            network: Network::SolanaMainnet,
+            network: default_network(),
             auto_lock_minutes: default_auto_lock_minutes(),
             hide_balances: default_hide_balances(),
             explorer: ExplorerKind::Solscan,
@@ -141,17 +146,25 @@ pub struct RuntimeConfig {
 }
 
 impl RuntimeConfig {
-    /// Resolution: user Advanced settings → process env (dev) → managed default for `network`.
+    /// Resolution: per-network map → legacy rpc_url (Solana) → env → managed default.
     pub fn resolve(settings: &AppSettings) -> Self {
-        let rpc_from_settings = settings
+        let network_id = normalize_network_id(&settings.network);
+        let desc = require_network(network_id);
+
+        let from_map = settings
+            .rpc_urls
+            .get(network_id)
+            .map(|s| s.trim().to_string())
+            .filter(|s| !s.is_empty());
+
+        let from_legacy = settings
             .rpc_url
             .as_ref()
             .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
-        let rpc_from_env = std::env::var("TAURVIA_RPC_URL")
-            .ok()
-            .map(|s| s.trim().to_string())
-            .filter(|s| !s.is_empty());
+            .filter(|s| !s.is_empty())
+            .filter(|_| desc.family == crate::ChainFamily::Solana);
+
+        let from_env = env_rpc_override(desc.family);
 
         let jupiter_from_settings = settings
             .jupiter_api_key
@@ -163,10 +176,13 @@ impl RuntimeConfig {
             .map(|s| s.trim().to_string())
             .filter(|s| !s.is_empty());
 
-        let managed = managed_rpc_url(settings.network).to_string();
+        let managed = managed_rpc_url(network_id).to_string();
 
         Self {
-            rpc_url: rpc_from_settings.or(rpc_from_env).unwrap_or(managed),
+            rpc_url: from_map
+                .or(from_legacy)
+                .or(from_env)
+                .unwrap_or(managed),
             jupiter_api_key: jupiter_from_settings.or(jupiter_from_env),
         }
     }

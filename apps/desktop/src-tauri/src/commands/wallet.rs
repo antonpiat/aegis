@@ -1,6 +1,6 @@
 use crate::error::{map_wallet_error, CommandResult};
 use crate::state::AppState;
-use models::{Network, RuntimeConfig, WalletFile};
+use models::{RuntimeConfig, WalletFile};
 use tauri::State;
 
 #[tauri::command]
@@ -193,11 +193,17 @@ pub fn export_wallet_to_path(
 #[tauri::command]
 #[specta::specta]
 pub fn change_wallet_network(
-    network: Network,
+    network: String,
     state: State<'_, AppState>,
 ) -> CommandResult<RuntimeConfig> {
     state
         .wallet
-        .change_network(network)
+        .change_network(&network)
         .map_err(map_wallet_error)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn list_networks() -> Vec<models::NetworkInfo> {
+    models::list_network_info(false)
 }

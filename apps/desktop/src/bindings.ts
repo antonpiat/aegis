@@ -123,13 +123,16 @@ async exportWalletToPath(password: string, path: string) : Promise<Result<null, 
     else return { status: "error", error: e  as any };
 }
 },
-async changeWalletNetwork(network: Network) : Promise<Result<RuntimeConfig, ApiError>> {
+async changeWalletNetwork(network: string) : Promise<Result<RuntimeConfig, ApiError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_wallet_network", { network }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
+},
+async listNetworks() : Promise<NetworkInfo[]> {
+    return await TAURI_INVOKE("list_networks");
 },
 async getWalletSnapshot() : Promise<Result<WalletSnapshot, ApiError>> {
     try {
@@ -158,6 +161,22 @@ async getTokenBalances() : Promise<Result<TokenBalance[], ApiError>> {
 async getActivity(limit: number) : Promise<Result<ActivityItem[], ApiError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("get_activity", { limit }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async previewSend(to: string, amount: number, asset: string | null) : Promise<Result<SendPreview, ApiError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("preview_send", { to, amount, asset }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async sendTransfer(password: string, to: string, amount: number, asset: string | null) : Promise<Result<SendResult, ApiError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("send_transfer", { password, to, amount, asset }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -243,7 +262,7 @@ async updateAppSettings(settings: AppSettings) : Promise<Result<RuntimeConfig, A
     else return { status: "error", error: e  as any };
 }
 },
-async getManagedDefaultRpcUrl(network: Network | null) : Promise<string> {
+async getManagedDefaultRpcUrl(network: string | null) : Promise<string> {
     return await TAURI_INVOKE("get_managed_default_rpc_url", { network });
 },
 async setOnboardingDraft(mnemonic: string, mode: string) : Promise<Result<null, ApiError>> {
@@ -282,21 +301,26 @@ async clearOnboardingDraft() : Promise<Result<null, ApiError>> {
 
 /** user-defined types **/
 
-export type ActivityItem = { signature: string; timestamp: number | null; status: string; direction: string; amount_sol: number | null; description: string }
+export type ActivityItem = { txid: string; timestamp: number | null; status: string; direction: string; amount: number | null; amount_symbol: string | null; description: string }
 export type ApiError = { code: string; message: string }
 export type AppSettings = { 
 /**
  * Optional user override (Advanced). Empty / None = managed default for `network`.
+ * Legacy single-URL field; treated as the Solana override when `rpc_urls` has no Solana key.
  */
 rpc_url: string | null; 
+/**
+ * Per-network RPC / Esplora overrides. Keyed by network id.
+ */
+rpc_urls?: Partial<{ [key in string]: string }>; 
 /**
  * Optional Jupiter portal key (Advanced). None = keyless.
  */
 jupiter_api_key: string | null; 
 /**
- * Active Solana cluster. Synced with `WalletFile.network` on switch.
+ * Active network id. Synced with `WalletFile.network` on switch.
  */
-network?: Network; 
+network?: string; 
 /**
  * Minutes of idle time before auto-lock. Defaults to 5. `0` disables.
  */
@@ -325,26 +349,39 @@ swap_favorite_tokens?: TokenInfo[] }
  * App chrome layout preference (synced from window size).
  */
 export type AppViewKind = "desktop" | "compact" | "phone"
+export type ChainFamily = "solana" | "evm" | "bitcoin" | "sui"
+export type ChainFeatures = { tokens: boolean; swap: boolean; utxo: boolean }
 export type CryptoEnvelope = { kdf: string; salt: string; cipher: string; nonce: string; ciphertext: string }
 export type ExplorerKind = "solscan" | "solanaExplorer"
-export type Network = "solana-mainnet" | "solana-devnet"
+/**
+ * Specta/UI copy of a descriptor (owned strings).
+ */
+export type NetworkInfo = { id: string; family: ChainFamily; name: string; native_symbol: string; is_testnet: boolean; eip155_chain_id: number | null; default_rpc: string; explorer_tx: string; explorer_address: string; features: ChainFeatures; enabled: boolean }
 export type OnboardingDraft = { mnemonic: string; mode: string }
 export type RuntimeConfig = { rpc_url: string; jupiter_api_key: string | null }
-export type SendPreview = { from: string; to: string; token: string; amount: string; estimated_fee_lamports: number; estimated_fee_sol: number; 
+export type SendPreview = { from: string; to: string; token: string; amount: string; network_name: string; estimated_fee: number; fee_symbol: string; 
 /**
  * True when the recipient's associated token account will be created in this transfer.
  */
 creates_token_account: boolean }
-export type SendResult = { signature: string; status: string }
+export type SendResult = { txid: string; status: string }
 export type SwapQuote = { input_mint: string; output_mint: string; input_symbol: string; output_symbol: string; in_amount: string; out_amount: string; in_amount_ui: number; out_amount_ui: number; price_impact_pct: number | null; network_fee_lamports: number; network_fee_sol: number; slippage_bps: number }
 export type SwapResult = { signature: string; status: string }
 export type TokenBalance = { mint: string; symbol: string; name: string; amount: string; decimals: number; ui_amount: number; logo_uri: string | null; price_usd: number | null; value_usd: number | null }
 export type TokenInfo = { mint: string; symbol: string; name: string; decimals: number; logo_uri: string | null }
+/**
+ * Public addresses keyed by family. Secrets are never stored here.
+ */
+export type WalletAddresses = { solana?: string | null; evm?: string | null; bitcoin?: string | null; sui?: string | null }
 export type WalletFile = { version: number; wallet_id: string; network: string; public_key: string; created_at: string; 
 /**
  * Absent in older files → password-only.
  */
-protection?: WalletProtection; crypto: CryptoEnvelope }
+protection?: WalletProtection; 
+/**
+ * Public family addresses. Missing on v1 files.
+ */
+addresses?: WalletAddresses; crypto: CryptoEnvelope }
 /**
  * How the wallet ciphertext is keyed.
  */
@@ -359,9 +396,13 @@ export type WalletProtection =
 "password-device"
 export type WalletSnapshot = { exists: boolean; unlocked: boolean; 
 /**
- * Wallet file network id (e.g. `solana-mainnet`). Empty wallet → default mainnet.
+ * Active network id (e.g. `solana-mainnet`, `ethereum-mainnet`).
  */
-network: string; public_key: string | null; sol_balance: number | null; sol_price_usd: number | null; sol_value_usd: number | null; total_portfolio_usd: number | null; tokens: TokenBalance[] | null }
+network: string; 
+/**
+ * Active-chain receive address (public).
+ */
+public_key: string | null; native_balance: number | null; native_symbol: string; native_price_usd: number | null; native_value_usd: number | null; total_portfolio_usd: number | null; tokens: TokenBalance[] | null }
 
 /** tauri-specta globals **/
 

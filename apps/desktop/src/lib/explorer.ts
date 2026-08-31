@@ -1,5 +1,4 @@
-import type { ExplorerKind } from "@/bindings";
-import { networkCluster } from "@/lib/network";
+import type { ExplorerKind, NetworkInfo } from "@/bindings";
 
 export function normalizeExplorer(value: unknown): ExplorerKind {
   switch (value) {
@@ -16,23 +15,30 @@ export function normalizeExplorer(value: unknown): ExplorerKind {
 
 export function txExplorerUrl(
   explorer: ExplorerKind,
-  signature: string,
-  options?: { network?: string | null },
+  txid: string,
+  options?: { network?: string | null; info?: NetworkInfo | null },
 ): string {
-  const cluster = networkCluster(options?.network);
+  const info = options?.info;
+  if (info && info.family !== "solana") {
+    return info.explorer_tx.replace("{txid}", txid);
+  }
   const clusterQuery =
-    cluster && cluster !== "mainnet-beta" ? `?cluster=${cluster}` : "";
-
+    options?.network === "solana-devnet" || info?.id === "solana-devnet"
+      ? "?cluster=devnet"
+      : "";
   switch (normalizeExplorer(explorer)) {
     case "solanaExplorer":
-      return `https://explorer.solana.com/tx/${signature}${clusterQuery}`;
+      return `https://explorer.solana.com/tx/${txid}${clusterQuery}`;
     case "solscan":
     default:
-      return `https://solscan.io/tx/${signature}${clusterQuery}`;
+      return `https://solscan.io/tx/${txid}${clusterQuery}`;
   }
 }
 
-export function explorerLabel(explorer: ExplorerKind): string {
+export function explorerLabel(explorer: ExplorerKind, info?: NetworkInfo | null): string {
+  if (info && info.family !== "solana") {
+    return `${info.name} explorer`;
+  }
   switch (normalizeExplorer(explorer)) {
     case "solanaExplorer":
       return "Solana Explorer";

@@ -6,6 +6,10 @@ license.workspace = true
 
 [dependencies]
 taurvia-solana = { path = "../taurvia-solana" }
+taurvia-evm = { path = "../taurvia-evm" }
+taurvia-bitcoin = { path = "../taurvia-bitcoin" }
+taurvia-hd = { path = "../taurvia-hd" }
+taurvia-chain = { path = "../taurvia-chain" }
 crypto = { path = "../crypto" }
 models = { path = "../models" }
 storage = { path = "../storage" }

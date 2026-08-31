@@ -34,8 +34,8 @@
     "active": true,
     "targets": "all",
     "category": "Finance",
-    "shortDescription": "Non-custodial Solana desktop wallet",
-    "longDescription": "Taurvia is a non-custodial Solana wallet. Keys stay encrypted on your device.",
+    "shortDescription": "Non-custodial desktop wallet",
+    "longDescription": "Taurvia is a non-custodial desktop wallet. Keys stay encrypted on your device; every signature is produced in Rust.",
     "icon": [
       "icons/32x32.png",
       "icons/128x128.png",

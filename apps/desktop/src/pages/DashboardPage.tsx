@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/misc";
 import { PageHeader } from "@/components/PageHeader";
 import { useWallet } from "@/context/WalletContext";
 import { localLogoForMint, withLocalLogo, WRAPPED_SOL } from "@/lib/tokenCatalog";
-import { formatSol, formatUsdMaybeHidden, formatHiddenBalance, shortenAddress } from "@/lib/utils";
+import { formatNative, formatUsdMaybeHidden, formatHiddenBalance, shortenAddress } from "@/lib/utils";
 import { Copy, Eye, EyeOff, RefreshCw } from "lucide-react";
 
 function TokenAvatar({ symbol, logoUri }: { symbol: string; logoUri: string | null }) {
@@ -33,12 +33,14 @@ function Skeleton({ className }: { className?: string }) {
 
 export function DashboardPage() {
   const {
-    solBalance,
-    solPriceUsd,
-    solValueUsd,
+    nativeBalance,
+    nativeSymbol,
+    nativePriceUsd,
+    nativeValueUsd,
     totalPortfolioUsd,
     tokens,
     publicKey,
+    networkInfo,
     refresh,
     balancesLoading,
     hideBalances,
@@ -54,7 +56,7 @@ export function DashboardPage() {
   };
 
   const busy = refreshing || balancesLoading;
-  const showSkeleton = balancesLoading && solBalance === null;
+  const showSkeleton = balancesLoading && nativeBalance === null;
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -110,16 +112,16 @@ export function DashboardPage() {
           <div className="flex flex-col gap-3 rounded-lg border border-border bg-background/50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
             <div className="flex min-w-0 items-center gap-3">
               <TokenAvatar
-                symbol="SOL"
-                logoUri={localLogoForMint(WRAPPED_SOL)}
+                symbol={nativeSymbol}
+                logoUri={nativeSymbol === "SOL" ? localLogoForMint(WRAPPED_SOL) : null}
               />
               <div className="min-w-0">
-                <p className="font-medium">SOL</p>
+                <p className="font-medium">{nativeSymbol}</p>
                 <p className="text-xs text-muted-foreground">
                   {showSkeleton
                     ? "Fetching price…"
-                    : solPriceUsd !== null
-                      ? `${formatUsdMaybeHidden(hideBalances, solPriceUsd)} / SOL`
+                    : nativePriceUsd !== null
+                      ? `${formatUsdMaybeHidden(hideBalances, nativePriceUsd)} / ${nativeSymbol}`
                       : "Price unavailable"}
                 </p>
               </div>
@@ -133,12 +135,12 @@ export function DashboardPage() {
               ) : (
                 <>
                   <p className="font-mono">
-                    {solBalance !== null
-                      ? formatHiddenBalance(hideBalances, formatSol(solBalance))
+                    {nativeBalance !== null
+                      ? formatHiddenBalance(hideBalances, formatNative(nativeBalance, nativeSymbol))
                       : "—"}
                   </p>
                   <p className="text-sm text-muted-foreground">
-                    {formatUsdMaybeHidden(hideBalances, solValueUsd)}
+                    {formatUsdMaybeHidden(hideBalances, nativeValueUsd)}
                   </p>
                 </>
               )}
@@ -165,8 +167,12 @@ export function DashboardPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>SPL Tokens</CardTitle>
-          <CardDescription>Balances with live USD prices when available.</CardDescription>
+          <CardTitle>{networkInfo?.features.tokens ? "Tokens" : "Assets"}</CardTitle>
+          <CardDescription>
+            {networkInfo?.family === "bitcoin"
+              ? "Bitcoin has no token list in this wallet."
+              : "Balances with live USD prices when available."}
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {showSkeleton ? (
@@ -189,7 +195,11 @@ export function DashboardPage() {
               </div>
             ))
           ) : tokens.length === 0 ? (
-            <p className="text-sm text-muted-foreground">No SPL token balances found.</p>
+            <p className="text-sm text-muted-foreground">
+              {networkInfo?.family === "bitcoin"
+                ? "Native Bitcoin only."
+                : "No token balances found."}
+            </p>
           ) : (
             tokens.map((token) => (
               <div

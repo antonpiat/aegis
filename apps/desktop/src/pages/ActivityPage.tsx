@@ -9,7 +9,7 @@ import { ActivityItem, ApiError, walletApi } from "@/lib/tauri";
 import { shortenAddress } from "@/lib/utils";
 
 export function ActivityPage() {
-  const { explorer, network } = useWallet();
+  const { explorer, network, networkInfo } = useWallet();
   const [items, setItems] = useState<ActivityItem[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -26,7 +26,7 @@ export function ActivityPage() {
         setLoading(false);
       }
     })();
-  }, []);
+  }, [network]);
 
   return (
     <div className="space-y-4 sm:space-y-6">
@@ -38,7 +38,9 @@ export function ActivityPage() {
       <Card>
         <CardHeader>
           <CardTitle>Transaction history</CardTitle>
-          <CardDescription>Signatures fetched directly from Solana RPC.</CardDescription>
+          <CardDescription>
+            Fetched from {networkInfo?.name ?? "the active network"}.
+          </CardDescription>
         </CardHeader>
         <CardContent className="space-y-3">
           {loading && <p className="text-sm text-muted-foreground">Loading activity...</p>}
@@ -48,7 +50,7 @@ export function ActivityPage() {
           )}
           {items.map((item) => (
             <div
-              key={item.signature}
+              key={item.txid}
               className="flex flex-col gap-3 rounded-lg border border-border bg-background/50 px-3 py-3 sm:flex-row sm:items-start sm:justify-between sm:px-4"
             >
               <div className="min-w-0">
@@ -56,9 +58,11 @@ export function ActivityPage() {
                 <button
                   type="button"
                   className="font-mono text-xs text-primary underline-offset-2 hover:underline"
-                  onClick={() => void openUrl(txExplorerUrl(explorer, item.signature, { network }))}
+                  onClick={() =>
+                    void openUrl(txExplorerUrl(explorer, item.txid, { network, info: networkInfo }))
+                  }
                 >
-                  {shortenAddress(item.signature, 8)}
+                  {shortenAddress(item.txid, 8)}
                 </button>
                 {item.timestamp && (
                   <p className="text-xs text-muted-foreground">
@@ -70,8 +74,10 @@ export function ActivityPage() {
                 <Badge className={item.status === "confirmed" ? "text-primary" : "text-destructive"}>
                   {item.status}
                 </Badge>
-                {item.amount_sol !== null && (
-                  <p className="mt-2 font-mono text-sm">{item.amount_sol.toFixed(6)} SOL</p>
+                {item.amount !== null && (
+                  <p className="mt-2 font-mono text-sm">
+                    {item.amount.toFixed(6)} {item.amount_symbol ?? ""}
+                  </p>
                 )}
               </div>
             </div>

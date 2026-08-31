@@ -1,4 +1,4 @@
-use models::{ActivityItem, TokenBalance, TokenInfo, WalletSnapshot};
+use models::{ActivityItem, ChainFamily, TokenBalance, TokenInfo, WalletSnapshot};
 use std::collections::HashMap;
 use std::time::Duration;
 use taurvia_solana::{get_metadata, get_prices, lamports_to_sol, WRAPPED_SOL_MINT};
@@ -12,37 +12,60 @@ impl WalletService {
     pub async fn get_snapshot(&self) -> Result<WalletSnapshot, WalletError> {
         let exists = self.wallet_exists();
         let network = self.wallet_network();
+        let desc = models::require_network(&network);
+        let empty = |unlocked: bool, public_key: Option<String>| WalletSnapshot {
+            exists,
+            unlocked,
+            network: network.clone(),
+            public_key,
+            native_balance: None,
+            native_symbol: desc.native_symbol.to_string(),
+            native_price_usd: None,
+            native_value_usd: None,
+            total_portfolio_usd: None,
+            tokens: None,
+        };
+
         if !exists {
-            return Ok(WalletSnapshot {
-                exists: false,
-                unlocked: false,
-                network,
-                public_key: None,
-                sol_balance: None,
-                sol_price_usd: None,
-                sol_value_usd: None,
-                total_portfolio_usd: None,
-                tokens: None,
-            });
+            return Ok(empty(false, None));
         }
 
         let unlocked = self.is_unlocked();
         let public_key = self.get_public_key();
 
         if !unlocked {
-            return Ok(WalletSnapshot {
-                exists: true,
-                unlocked: false,
-                network,
-                public_key,
-                sol_balance: None,
-                sol_price_usd: None,
-                sol_value_usd: None,
-                total_portfolio_usd: None,
-                tokens: None,
-            });
+            return Ok(empty(false, public_key));
         }
 
+        match desc.family {
+            ChainFamily::Solana => self.solana_snapshot().await,
+            ChainFamily::Evm => self.evm_snapshot().await,
+            ChainFamily::Bitcoin => self.bitcoin_snapshot().await,
+            ChainFamily::Sui => Err(WalletError::Operation(anyhow::anyhow!(
+                "Sui is not enabled yet"
+            ))),
+        }
+    }
+
+    async fn evm_snapshot(&self) -> Result<WalletSnapshot, WalletError> {
+        let url = self.evm_rpc_url.lock().unwrap().clone();
+        let desc = *self.active_descriptor();
+        let rpc = taurvia_evm::EvmRpc::new(&url, desc);
+        let signer = self.with_session(|k| k.evm.clone())?;
+        rpc.snapshot(&signer).await.map_err(WalletError::Operation)
+    }
+
+    async fn bitcoin_snapshot(&self) -> Result<WalletSnapshot, WalletError> {
+        let url = self.btc_esplora.lock().unwrap().clone();
+        let desc = *self.active_descriptor();
+        let rpc = taurvia_bitcoin::BtcRpc::new(&url, desc);
+        let signer = self.with_session(|k| k.btc(desc.is_testnet).clone())?;
+        rpc.snapshot(&signer).await.map_err(WalletError::Operation)
+    }
+
+    async fn solana_snapshot(&self) -> Result<WalletSnapshot, WalletError> {
+        let network = self.wallet_network();
+        let public_key = self.get_public_key();
         let pubkey = self.require_pubkey()?;
         let rpc = self.rpc_handle();
         let (lamports, mut tokens) = rpc
@@ -50,8 +73,6 @@ impl WalletService {
             .await
             .map_err(WalletError::Operation)?;
 
-        // Curated labels first; Jupiter enrichment is budgeted so unlock/dashboard
-        // never waits on a slow market-data API.
         apply_local_metadata(&mut tokens);
         let mints: Vec<String> = tokens.iter().map(|token| token.mint.clone()).collect();
         let sol_mint = WRAPPED_SOL_MINT.to_string();
@@ -64,82 +85,73 @@ impl WalletService {
         })
         .await;
 
-        let mut sol_price_usd = None;
+        let mut native_price_usd = None;
         if let Ok((metadata, prices, sol_prices)) = enrichment {
             apply_remote_enrichment(
                 &mut tokens,
                 metadata.unwrap_or_default(),
                 prices.unwrap_or_default(),
             );
-            sol_price_usd = sol_prices
+            native_price_usd = sol_prices
                 .ok()
                 .and_then(|prices| prices.get(WRAPPED_SOL_MINT).copied());
         }
 
-        let sol_balance = lamports_to_sol(lamports);
-        let sol_value_usd = sol_price_usd.map(|price| price * sol_balance);
+        let native_balance = lamports_to_sol(lamports);
+        let native_value_usd = native_price_usd.map(|price| price * native_balance);
         let tokens_value: f64 = tokens.iter().filter_map(|token| token.value_usd).sum();
-        let total_portfolio_usd = Some(sol_value_usd.unwrap_or(0.0) + tokens_value);
+        let total_portfolio_usd = Some(native_value_usd.unwrap_or(0.0) + tokens_value);
 
         Ok(WalletSnapshot {
             exists: true,
             unlocked: true,
             network,
             public_key,
-            sol_balance: Some(sol_balance),
-            sol_price_usd,
-            sol_value_usd,
+            native_balance: Some(native_balance),
+            native_symbol: "SOL".into(),
+            native_price_usd,
+            native_value_usd,
             total_portfolio_usd,
             tokens: Some(tokens),
         })
     }
 
     pub async fn get_sol_balance(&self) -> Result<f64, WalletError> {
-        let pubkey = self.require_pubkey()?;
-        let lamports = self
-            .rpc_handle()
-            .get_balance(&pubkey)
-            .await
-            .map_err(WalletError::Operation)?;
-        Ok(lamports_to_sol(lamports))
+        let snapshot = self.get_snapshot().await?;
+        snapshot.native_balance.ok_or(WalletError::Locked)
     }
 
     pub async fn get_token_balances(&self) -> Result<Vec<TokenBalance>, WalletError> {
-        let pubkey = self.require_pubkey()?;
-        let mut tokens = self
-            .rpc_handle()
-            .get_token_balances(&pubkey)
-            .await
-            .map_err(WalletError::Operation)?;
-        enrich_token_balances(&mut tokens).await;
-        Ok(tokens)
+        let snapshot = self.get_snapshot().await?;
+        Ok(snapshot.tokens.unwrap_or_default())
     }
 
     pub async fn get_activity(&self, limit: usize) -> Result<Vec<ActivityItem>, WalletError> {
-        let pubkey = self.require_pubkey()?;
-        self.rpc_handle()
-            .get_activity(&pubkey, limit)
-            .await
-            .map_err(WalletError::Operation)
-    }
-}
-
-async fn enrich_token_balances(tokens: &mut [TokenBalance]) {
-    if tokens.is_empty() {
-        return;
-    }
-    apply_local_metadata(tokens);
-    let mints: Vec<String> = tokens.iter().map(|token| token.mint.clone()).collect();
-    let enrichment = tokio::time::timeout(MARKET_DATA_BUDGET, async {
-        tokio::join!(get_metadata(&mints), get_prices(&mints))
-    })
-    .await;
-    if let Ok((metadata, prices)) = enrichment {
-        apply_remote_enrichment(
-            tokens,
-            metadata.unwrap_or_default(),
-            prices.unwrap_or_default(),
-        );
+        let desc = self.active_descriptor();
+        match desc.family {
+            ChainFamily::Solana => {
+                let pubkey = self.require_pubkey()?;
+                self.rpc_handle()
+                    .get_activity(&pubkey, limit)
+                    .await
+                    .map_err(WalletError::Operation)
+            }
+            ChainFamily::Evm => {
+                let signer = self.with_session(|k| k.evm.clone())?;
+                taurvia_evm::activity(*desc, &signer, limit)
+                    .await
+                    .map_err(WalletError::Operation)
+            }
+            ChainFamily::Bitcoin => {
+                let url = self.btc_esplora.lock().unwrap().clone();
+                let rpc = taurvia_bitcoin::BtcRpc::new(&url, *desc);
+                let signer = self.with_session(|k| k.btc(desc.is_testnet).clone())?;
+                rpc.activity(&signer, limit)
+                    .await
+                    .map_err(WalletError::Operation)
+            }
+            ChainFamily::Sui => Ok(Vec::new()),
+        }
     }
 }
 
@@ -166,7 +178,6 @@ fn apply_remote_enrichment(
 ) {
     for token in tokens.iter_mut() {
         if let Some(info) = metadata.get(&token.mint) {
-            // Prefer real symbols over shortened-mint fallbacks.
             if !info.symbol.contains("...") {
                 token.symbol = info.symbol.clone();
                 token.name = info.name.clone();

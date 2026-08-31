@@ -10,8 +10,13 @@ export function shortenAddress(address: string, chars = 4): string {
   return `${address.slice(0, chars)}...${address.slice(-chars)}`;
 }
 
+export function formatNative(amount: number, symbol: string): string {
+  const digits = symbol === "BTC" ? 8 : 4;
+  return `${amount.toFixed(digits)} ${symbol}`;
+}
+
 export function formatSol(amount: number): string {
-  return `${amount.toFixed(4)} SOL`;
+  return formatNative(amount, "SOL");
 }
 
 export function formatUsd(amount: number | null | undefined): string {
