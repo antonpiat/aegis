@@ -15,6 +15,9 @@ permissions:
 env:
   CARGO_TERM_COLOR: always
   CARGO_INCREMENTAL: "0"
+  # Skip DWARF for CI: linking alloy + solana-sdk dominates this job.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
   rust:
@@ -24,6 +27,9 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v7
 
+      - name: Install mold
+        uses: rui314/setup-mold@v1
+
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
@@ -31,8 +37,7 @@ jobs:
         uses: Swatinem/rust-cache@v2
         with:
           workspaces: ". -> target"
-          # PRs restore from main; skip the cache-upload wait on every PR.
-          save-if: ${{ github.ref == 'refs/heads/main' }}
+          shared-key: ci-linux
 
       # Skip taurvia-desktop: compiling Tauri needs WebKit GTK and only runs a
       # Specta bindings export. Bindings are committed; tsc covers the TS side.
