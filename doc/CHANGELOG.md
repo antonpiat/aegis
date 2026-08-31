@@ -7,6 +7,10 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ## [Unreleased]
 
+---
+
+## [0.5.0] - 2026-08-31
+
 ### Added
 
 - Ethereum (Mainnet + Sepolia) and Bitcoin (Mainnet + testnet) behind the same Rust signing core — one seed, family keyring, descriptor registry
@@ -298,7 +302,8 @@ When cutting a new version:
 6. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z` (tag must match `tauri.conf.json`).
 7. [Release](../.github/workflows/release.yml) builds unsigned installers and attaches them to the GitHub Release. Edit the notes if needed.
 
-[Unreleased]: https://github.com/antonpiat/taurvia/compare/v0.4.3...HEAD
+[Unreleased]: https://github.com/antonpiat/taurvia/compare/v0.5.0...HEAD
+[0.5.0]: https://github.com/antonpiat/taurvia/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/antonpiat/taurvia/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/antonpiat/taurvia/compare/v0.4.1...v0.4.2
 [0.4.1]: https://github.com/antonpiat/taurvia/releases/tag/v0.4.1
