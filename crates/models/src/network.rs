@@ -84,13 +84,13 @@ const SOLANA_FEATURES: ChainFeatures = ChainFeatures {
 
 const EVM_FEATURES: ChainFeatures = ChainFeatures {
     tokens: true,
-    swap: false,
+    swap: true,
     utxo: false,
 };
 
 const BITCOIN_FEATURES: ChainFeatures = ChainFeatures {
     tokens: false,
-    swap: false,
+    swap: true,
     utxo: true,
 };
 
@@ -306,6 +306,23 @@ pub fn normalize_network_id(value: &str) -> &'static str {
 
 pub fn managed_rpc_url(network_id: &str) -> &'static str {
     require_network(network_id).default_rpc
+}
+
+pub fn default_enabled_network_ids() -> Vec<String> {
+    vec![
+        NETWORK_SOLANA_MAINNET.to_string(),
+        NETWORK_ETHEREUM_MAINNET.to_string(),
+        NETWORK_BITCOIN_MAINNET.to_string(),
+    ]
+}
+
+pub fn mainnet_id_for_family(family: ChainFamily) -> &'static str {
+    match family {
+        ChainFamily::Solana => NETWORK_SOLANA_MAINNET,
+        ChainFamily::Evm => NETWORK_ETHEREUM_MAINNET,
+        ChainFamily::Bitcoin => NETWORK_BITCOIN_MAINNET,
+        ChainFamily::Sui => "sui-mainnet",
+    }
 }
 
 /// Env overlay for a family (dev-only). Network-specific map in settings wins first.

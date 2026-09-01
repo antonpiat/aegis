@@ -34,11 +34,10 @@ pub fn get_managed_default_rpc_url(network: Option<String>) -> String {
 #[tauri::command]
 #[specta::specta]
 pub fn set_onboarding_draft(
-    mnemonic: String,
-    mode: String,
+    draft: OnboardingDraft,
     state: State<'_, AppState>,
 ) -> CommandResult<()> {
-    state.set_onboarding(OnboardingDraft { mnemonic, mode });
+    state.set_onboarding(draft);
     Ok(())
 }
 

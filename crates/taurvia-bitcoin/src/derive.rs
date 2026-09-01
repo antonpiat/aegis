@@ -26,26 +26,28 @@ impl BtcSigner {
             .map_err(|e| anyhow!("invalid bitcoin key: {e}"))?;
         Ok(PrivateKey::new(sk, self.network))
     }
+
+    pub fn from_secret(secret: [u8; 32], testnet: bool) -> Result<Self> {
+        signer_from_secret(secret, testnet)
+    }
 }
 
-pub fn derive_from_seed(seed: &[u8], testnet: bool) -> Result<BtcSigner> {
+pub fn from_wif(input: &str) -> Result<(BtcSigner, BtcSigner)> {
+    let pk = PrivateKey::from_wif(input.trim())
+        .map_err(|e| anyhow!("invalid Bitcoin WIF: {e}"))?;
+    let mut secret = [0u8; 32];
+    secret.copy_from_slice(&pk.inner.secret_bytes());
+    let mainnet = signer_from_secret(secret, false)?;
+    let testnet = signer_from_secret(secret, true)?;
+    Ok((mainnet, testnet))
+}
+
+fn signer_from_secret(secret: [u8; 32], testnet: bool) -> Result<BtcSigner> {
     let network = if testnet {
         Network::Testnet
     } else {
         Network::Bitcoin
     };
-    let path_str = if testnet {
-        BITCOIN_TESTNET_PATH
-    } else {
-        BITCOIN_MAINNET_PATH
-    };
-    let path: bip32::DerivationPath = path_str
-        .parse()
-        .map_err(|e| anyhow!("invalid bitcoin path: {e}"))?;
-    let xprv = bip32::XPrv::derive_from_path(seed, &path)
-        .map_err(|e| anyhow!("bitcoin derivation: {e}"))?;
-    let mut secret = Zeroizing::new([0u8; 32]);
-    secret.copy_from_slice(xprv.private_key().to_bytes().as_slice());
     let secp = secp();
     let privkey = {
         let sk = bitcoin::secp256k1::SecretKey::from_slice(secret.as_slice())
@@ -58,8 +60,24 @@ pub fn derive_from_seed(seed: &[u8], testnet: bool) -> Result<BtcSigner> {
     Ok(BtcSigner {
         address: address.to_string(),
         network,
-        secret,
+        secret: Zeroizing::new(secret),
     })
+}
+
+pub fn derive_from_seed(seed: &[u8], testnet: bool) -> Result<BtcSigner> {
+    let path_str = if testnet {
+        BITCOIN_TESTNET_PATH
+    } else {
+        BITCOIN_MAINNET_PATH
+    };
+    let path: bip32::DerivationPath = path_str
+        .parse()
+        .map_err(|e| anyhow!("invalid bitcoin path: {e}"))?;
+    let xprv = bip32::XPrv::derive_from_path(seed, &path)
+        .map_err(|e| anyhow!("bitcoin derivation: {e}"))?;
+    let mut secret = Zeroizing::new([0u8; 32]);
+    secret.copy_from_slice(xprv.private_key().to_bytes().as_slice());
+    signer_from_secret(*secret, testnet)
 }
 
 pub fn validate_address(address: &str, testnet: bool) -> Result<()> {

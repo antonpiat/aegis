@@ -1,9 +1,10 @@
 use serde::{Deserialize, Serialize};
 use specta::Type;
 
-pub const WALLET_FILE_VERSION: u32 = 2;
+pub const WALLET_FILE_VERSION: u32 = 3;
 pub const MIN_WALLET_FILE_VERSION: u32 = 1;
 pub const DEFAULT_DERIVATION_PATH: &str = "m/44'/501'/0'/0'";
+pub const DEFAULT_ACCOUNT_NAME: &str = "Account 1";
 
 /// How the wallet ciphertext is keyed.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
@@ -22,6 +23,39 @@ impl WalletProtection {
     }
 }
 
+/// How secrets were imported. Key-only wallets cannot derive other families.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize, Type)]
+#[serde(rename_all = "kebab-case")]
+pub enum ImportKind {
+    #[default]
+    Mnemonic,
+    SolanaKey,
+    EvmKey,
+    BitcoinKey,
+}
+
+impl ImportKind {
+    pub fn family(self) -> Option<crate::ChainFamily> {
+        match self {
+            Self::Mnemonic => None,
+            Self::SolanaKey => Some(crate::ChainFamily::Solana),
+            Self::EvmKey => Some(crate::ChainFamily::Evm),
+            Self::BitcoinKey => Some(crate::ChainFamily::Bitcoin),
+        }
+    }
+
+    pub fn has_mnemonic(self) -> bool {
+        matches!(self, Self::Mnemonic)
+    }
+
+    pub fn default_enabled_networks(self) -> Vec<String> {
+        match self.family() {
+            None => crate::default_enabled_network_ids(),
+            Some(family) => vec![crate::mainnet_id_for_family(family).to_string()],
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct CryptoEnvelope {
     pub kdf: String,
@@ -33,6 +67,7 @@ pub struct CryptoEnvelope {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct EncryptedPayload {
+    #[serde(default)]
     pub mnemonic: String,
     #[serde(rename = "private_key")]
     pub private_key: String,
@@ -72,6 +107,14 @@ impl WalletAddresses {
     }
 }
 
+fn default_account_name() -> String {
+    DEFAULT_ACCOUNT_NAME.to_string()
+}
+
+fn default_enabled_networks() -> Vec<String> {
+    crate::default_enabled_network_ids()
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct WalletFile {
     pub version: u32,
@@ -85,5 +128,11 @@ pub struct WalletFile {
     /// Public family addresses. Missing on v1 files.
     #[serde(default)]
     pub addresses: WalletAddresses,
+    #[serde(default = "default_account_name")]
+    pub account_name: String,
+    #[serde(default)]
+    pub import_kind: ImportKind,
+    #[serde(default = "default_enabled_networks")]
+    pub enabled_networks: Vec<String>,
     pub crypto: CryptoEnvelope,
 }

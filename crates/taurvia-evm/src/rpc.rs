@@ -24,8 +24,8 @@ const MARKET_DATA_BUDGET: Duration = Duration::from_secs(4);
 const NATIVE_MINT: &str = "eth";
 
 pub struct EvmRpc {
-    rpc_url: String,
-    descriptor: NetworkDescriptor,
+    pub(crate) rpc_url: String,
+    pub(crate) descriptor: NetworkDescriptor,
 }
 
 impl EvmRpc {
@@ -76,6 +76,11 @@ impl EvmRpc {
             native_value_usd,
             total_portfolio_usd: Some(native_value_usd.unwrap_or(0.0) + tokens_value),
             tokens: Some(tokens),
+            chains: Vec::new(),
+            account_name: String::new(),
+            import_kind: models::ImportKind::Mnemonic,
+            enabled_networks: Vec::new(),
+            can_reveal_mnemonic: false,
         })
     }
 

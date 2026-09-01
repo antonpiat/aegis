@@ -12,9 +12,11 @@ pub struct SwapQuote {
     pub in_amount_ui: f64,
     pub out_amount_ui: f64,
     pub price_impact_pct: Option<f64>,
-    pub network_fee_lamports: u64,
-    pub network_fee_sol: f64,
+    pub network_fee: f64,
+    pub fee_symbol: String,
     pub slippage_bps: u16,
+    #[serde(default)]
+    pub route: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]

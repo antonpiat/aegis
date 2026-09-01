@@ -8,8 +8,12 @@ import { Copy } from "lucide-react";
 import { useState } from "react";
 
 export function ReceivePage() {
-  const { publicKey, networkInfo, nativeSymbol } = useWallet();
+  const { publicKey, networkInfo, nativeSymbol, networks, enabledNetworks, network, changeNetwork } =
+    useWallet();
   const [copied, setCopied] = useState(false);
+  const switchable = networks.filter(
+    (n) => n.enabled && enabledNetworks.includes(n.id) && !n.is_testnet,
+  );
 
   const handleCopy = async () => {
     if (!publicKey) return;
@@ -33,6 +37,21 @@ export function ReceivePage() {
           <CardDescription>{receiveWarning(networkInfo)}</CardDescription>
         </CardHeader>
         <CardContent className="flex flex-col items-center gap-4">
+          {switchable.length > 1 && (
+            <div className="flex flex-wrap justify-center gap-1">
+              {switchable.map((n) => (
+                <Button
+                  key={n.id}
+                  type="button"
+                  size="sm"
+                  variant={n.id === network ? "default" : "outline"}
+                  onClick={() => void changeNetwork(n.id)}
+                >
+                  {n.name}
+                </Button>
+              ))}
+            </div>
+          )}
           {publicKey ? (
             <>
               <div className="rounded-xl bg-white p-3 sm:p-4">

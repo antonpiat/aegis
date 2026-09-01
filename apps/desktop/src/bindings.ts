@@ -21,17 +21,25 @@ async validateMnemonic(mnemonic: string) : Promise<Result<null, ApiError>> {
     else return { status: "error", error: e  as any };
 }
 },
-async createWallet(mnemonic: string, password: string) : Promise<Result<WalletFile, ApiError>> {
+async createWallet(mnemonic: string, password: string, accountName: string) : Promise<Result<WalletFile, ApiError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("create_wallet", { mnemonic, password }) };
+    return { status: "ok", data: await TAURI_INVOKE("create_wallet", { mnemonic, password, accountName }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
 }
 },
-async importWallet(mnemonic: string, password: string) : Promise<Result<WalletFile, ApiError>> {
+async importWallet(mnemonic: string, password: string, accountName: string) : Promise<Result<WalletFile, ApiError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("import_wallet", { mnemonic, password }) };
+    return { status: "ok", data: await TAURI_INVOKE("import_wallet", { mnemonic, password, accountName }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async importPrivateKey(secret: string, password: string, accountName: string) : Promise<Result<WalletFile, ApiError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("import_private_key", { secret, password, accountName }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -110,6 +118,22 @@ async exportWalletToPath(password: string, path: string) : Promise<Result<null, 
 async changeWalletNetwork(network: string) : Promise<Result<RuntimeConfig, ApiError>> {
     try {
     return { status: "ok", data: await TAURI_INVOKE("change_wallet_network", { network }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setEnabledNetworks(networks: string[]) : Promise<Result<RuntimeConfig, ApiError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_enabled_networks", { networks }) };
+} catch (e) {
+    if(e instanceof Error) throw e;
+    else return { status: "error", error: e  as any };
+}
+},
+async setAccountName(name: string) : Promise<Result<null, ApiError>> {
+    try {
+    return { status: "ok", data: await TAURI_INVOKE("set_account_name", { name }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -201,9 +225,9 @@ async updateAppSettings(settings: AppSettings) : Promise<Result<RuntimeConfig, A
 async getManagedDefaultRpcUrl(network: string | null) : Promise<string> {
     return await TAURI_INVOKE("get_managed_default_rpc_url", { network });
 },
-async setOnboardingDraft(mnemonic: string, mode: string) : Promise<Result<null, ApiError>> {
+async setOnboardingDraft(draft: OnboardingDraft) : Promise<Result<null, ApiError>> {
     try {
-    return { status: "ok", data: await TAURI_INVOKE("set_onboarding_draft", { mnemonic, mode }) };
+    return { status: "ok", data: await TAURI_INVOKE("set_onboarding_draft", { draft }) };
 } catch (e) {
     if(e instanceof Error) throw e;
     else return { status: "error", error: e  as any };
@@ -258,6 +282,14 @@ jupiter_api_key: string | null;
  */
 network?: string; 
 /**
+ * Activated mainnets (Phantom-style). Testnets stay Advanced via `network`.
+ */
+enabled_networks?: string[]; 
+/**
+ * Optional 0x API key for Ethereum swaps.
+ */
+zerox_api_key?: string | null; 
+/**
  * Minutes of idle time before auto-lock. Defaults to 5. `0` disables.
  */
 auto_lock_minutes?: number | null; 
@@ -287,13 +319,25 @@ swap_favorite_tokens?: TokenInfo[] }
 export type AppViewKind = "desktop" | "compact" | "phone"
 export type ChainFamily = "solana" | "evm" | "bitcoin" | "sui"
 export type ChainFeatures = { tokens: boolean; swap: boolean; utxo: boolean }
+/**
+ * One family's balances inside a multi-chain portfolio.
+ */
+export type ChainSnapshot = { network: string; public_key: string | null; native_balance: number | null; native_symbol: string; native_price_usd: number | null; native_value_usd: number | null; total_usd: number | null; tokens: TokenBalance[] | null }
 export type CryptoEnvelope = { kdf: string; salt: string; cipher: string; nonce: string; ciphertext: string }
 export type ExplorerKind = "solscan" | "solanaExplorer"
+/**
+ * How secrets were imported. Key-only wallets cannot derive other families.
+ */
+export type ImportKind = "mnemonic" | "solana-key" | "evm-key" | "bitcoin-key"
 /**
  * Specta/UI copy of a descriptor (owned strings).
  */
 export type NetworkInfo = { id: string; family: ChainFamily; name: string; native_symbol: string; is_testnet: boolean; eip155_chain_id: number | null; default_rpc: string; explorer_tx: string; explorer_address: string; features: ChainFeatures; enabled: boolean }
-export type OnboardingDraft = { mnemonic: string; mode: string }
+export type OnboardingDraft = { mnemonic?: string; mode: string; 
+/**
+ * Raw private key when `mode` is `import-key`.
+ */
+secret?: string; import_kind?: string; account_name?: string }
 export type RuntimeConfig = { rpc_url: string; jupiter_api_key: string | null }
 export type SendPreview = { from: string; to: string; token: string; amount: string; network_name: string; estimated_fee: number; fee_symbol: string; 
 /**
@@ -301,7 +345,7 @@ export type SendPreview = { from: string; to: string; token: string; amount: str
  */
 creates_token_account: boolean }
 export type SendResult = { txid: string; status: string }
-export type SwapQuote = { input_mint: string; output_mint: string; input_symbol: string; output_symbol: string; in_amount: string; out_amount: string; in_amount_ui: number; out_amount_ui: number; price_impact_pct: number | null; network_fee_lamports: number; network_fee_sol: number; slippage_bps: number }
+export type SwapQuote = { input_mint: string; output_mint: string; input_symbol: string; output_symbol: string; in_amount: string; out_amount: string; in_amount_ui: number; out_amount_ui: number; price_impact_pct: number | null; network_fee: number; fee_symbol: string; slippage_bps: number; route?: string }
 export type SwapResult = { signature: string; status: string }
 export type TokenBalance = { mint: string; symbol: string; name: string; amount: string; decimals: number; ui_amount: number; logo_uri: string | null; price_usd: number | null; value_usd: number | null }
 export type TokenInfo = { mint: string; symbol: string; name: string; decimals: number; logo_uri: string | null }
@@ -317,7 +361,7 @@ protection?: WalletProtection;
 /**
  * Public family addresses. Missing on v1 files.
  */
-addresses?: WalletAddresses; crypto: CryptoEnvelope }
+addresses?: WalletAddresses; account_name?: string; import_kind?: ImportKind; enabled_networks?: string[]; crypto: CryptoEnvelope }
 /**
  * How the wallet ciphertext is keyed.
  */
@@ -332,13 +376,13 @@ export type WalletProtection =
 "password-device"
 export type WalletSnapshot = { exists: boolean; unlocked: boolean; 
 /**
- * Active network id (e.g. `solana-mainnet`, `ethereum-mainnet`).
+ * Last-used network for Send / Receive (not an exclusive mode).
  */
 network: string; 
 /**
- * Active-chain receive address (public).
+ * Last-used chain receive address (public).
  */
-public_key: string | null; native_balance: number | null; native_symbol: string; native_price_usd: number | null; native_value_usd: number | null; total_portfolio_usd: number | null; tokens: TokenBalance[] | null }
+public_key: string | null; native_balance: number | null; native_symbol: string; native_price_usd: number | null; native_value_usd: number | null; total_portfolio_usd: number | null; tokens: TokenBalance[] | null; chains?: ChainSnapshot[]; account_name?: string; import_kind?: ImportKind; enabled_networks?: string[]; can_reveal_mnemonic?: boolean }
 
 /** tauri-specta globals **/
 

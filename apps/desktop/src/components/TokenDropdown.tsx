@@ -2,7 +2,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { withLocalLogo } from "@/lib/tokenCatalog";
+import { TokenIcon } from "@/components/TokenIcon";
+import { withLocalLogo, type TokenChain } from "@/lib/tokenCatalog";
 import { cn, formatHiddenBalance, shortenAddress } from "@/lib/utils";
 import { useWallet } from "@/context/WalletContext";
 import type { TokenInfo } from "@/lib/tauri";
@@ -14,33 +15,22 @@ export type DropdownToken = {
   name: string;
   logo_uri: string | null;
   balanceUi?: number;
+  chain?: "solana" | "evm" | "bitcoin";
 };
 
 function TokenAvatar({
   symbol,
   logoUri,
-  eager,
+  mint,
+  chain,
 }: {
   symbol: string;
   logoUri: string | null;
   eager?: boolean;
+  mint?: string;
+  chain?: "solana" | "evm" | "bitcoin";
 }) {
-  if (logoUri) {
-    return (
-      <img
-        src={logoUri}
-        alt=""
-        className="h-8 w-8 shrink-0 rounded-full border border-border bg-background object-cover"
-        loading={eager ? "eager" : "lazy"}
-        decoding="async"
-      />
-    );
-  }
-  return (
-    <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-secondary text-xs font-semibold">
-      {symbol.slice(0, 2).toUpperCase()}
-    </div>
-  );
+  return <TokenIcon symbol={symbol} mint={mint} chain={chain} logoUri={logoUri} size={32} />;
 }
 
 function matchesQuery(token: DropdownToken, query: string): boolean {
@@ -64,6 +54,7 @@ export function TokenDropdown({
   onSelect,
   onAddToken,
   enableRemoteSearch = false,
+  chain,
 }: {
   label: string;
   token: DropdownToken | undefined;
@@ -76,6 +67,7 @@ export function TokenDropdown({
   /** Persist + add a remote search hit to the local list. */
   onAddToken?: (info: TokenInfo) => void;
   enableRemoteSearch?: boolean;
+  chain?: TokenChain;
 }) {
   const { hideBalances } = useWallet();
   const rootRef = useRef<HTMLDivElement>(null);
@@ -135,7 +127,7 @@ export function TokenDropdown({
           const results = await walletApi.searchTokens(q);
           if (cancelled) return;
           const localMints = new Set(tokens.map((t) => t.mint));
-          setRemote(results.filter((r) => !localMints.has(r.mint)).map(withLocalLogo));
+          setRemote(results.filter((r) => !localMints.has(r.mint)).map((t) => withLocalLogo(t)));
           setSearchError(null);
         } catch (err) {
           if (!cancelled) {
@@ -158,7 +150,9 @@ export function TokenDropdown({
     };
   }, [query, open, enableRemoteSearch, tokens]);
 
-  const displayToken = token ? withLocalLogo(token) : undefined;
+  const displayToken = token
+    ? withLocalLogo({ ...token, chain: token.chain ?? chain }, token.chain ?? chain)
+    : undefined;
 
   return (
     <div className="space-y-2" ref={rootRef}>
@@ -180,7 +174,8 @@ export function TokenDropdown({
               <TokenAvatar
                 symbol={displayToken.symbol}
                 logoUri={displayToken.logo_uri}
-                eager
+                mint={displayToken.mint}
+                chain={displayToken.chain}
               />
               <span className="min-w-0">
                 <span className="block text-base font-semibold leading-tight">
@@ -236,7 +231,10 @@ export function TokenDropdown({
             ) : (
               <>
                 {localHits.map((option) => {
-                  const row = withLocalLogo(option);
+                  const row = withLocalLogo(
+                    { ...option, chain: option.chain ?? chain },
+                    option.chain ?? chain,
+                  );
                   const selected = row.mint === selectedMint;
                   return (
                     <button
@@ -251,7 +249,12 @@ export function TokenDropdown({
                       )}
                     >
                       <span className="flex min-w-0 items-center gap-3">
-                        <TokenAvatar symbol={row.symbol} logoUri={row.logo_uri} />
+                        <TokenAvatar
+                          symbol={row.symbol}
+                          logoUri={row.logo_uri}
+                          mint={row.mint}
+                          chain={row.chain}
+                        />
                         <span className="min-w-0">
                           <span className="block font-semibold">{row.symbol}</span>
                           <span className="block truncate text-xs text-muted-foreground">
@@ -281,7 +284,7 @@ export function TokenDropdown({
                       More results
                     </p>
                     {remote.map((info) => {
-                      const row = withLocalLogo(info);
+                      const row = withLocalLogo(info, chain);
                       return (
                         <button
                           key={row.mint}
@@ -295,7 +298,12 @@ export function TokenDropdown({
                           className="flex w-full items-center justify-between rounded-md px-2.5 py-2 text-left transition-colors hover:bg-accent/50"
                         >
                           <span className="flex min-w-0 items-center gap-3">
-                            <TokenAvatar symbol={row.symbol} logoUri={row.logo_uri} />
+                            <TokenAvatar
+                              symbol={row.symbol}
+                              logoUri={row.logo_uri}
+                              mint={row.mint}
+                              chain={chain}
+                            />
                             <span className="min-w-0">
                               <span className="block font-semibold">{row.symbol}</span>
                               <span className="block truncate text-xs text-muted-foreground">

@@ -25,7 +25,7 @@ function CreateRedirect() {
       try {
         const phrase = await walletApi.generateMnemonic();
         if (cancelled) return;
-        await walletApi.setOnboardingDraft(phrase, "create");
+        await walletApi.setOnboardingDraft({ mnemonic: phrase, mode: "create" });
         if (cancelled) return;
         navigate("/onboarding/seed", { replace: true });
       } catch (err) {
@@ -120,7 +120,7 @@ function ImportWalletForm() {
     setError(null);
     try {
       await walletApi.validateMnemonic(normalized);
-      await walletApi.setOnboardingDraft(normalized, "import");
+      await walletApi.setOnboardingDraft({ mnemonic: normalized, mode: "import" });
       clearPhrase();
       navigate("/onboarding/password");
     } catch (err) {
@@ -135,12 +135,8 @@ function ImportWalletForm() {
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
       <Card className="w-full max-w-2xl">
         <CardHeader>
-          <CardTitle>Import from recovery phrase</CardTitle>
-          <CardDescription>
-            Paste your 12 or 24-word recovery phrase, or import it from a .txt / .json file. Prefer
-            Import from backup when you have an exported wallet file. Anyone with this phrase can
-            move your funds. The phrase stays masked on screen.
-          </CardDescription>
+          <CardTitle>Import recovery phrase</CardTitle>
+          <CardDescription>12 or 24 words. Anyone with this phrase can move your funds.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           {loadedFile && !editing ? (
@@ -234,7 +230,7 @@ function ImportWalletForm() {
           </div>
           {error && <Alert className="border-destructive/40 text-destructive">{error}</Alert>}
           <div className="flex gap-3">
-            <Button variant="outline" onClick={() => navigate("/onboarding")}>
+            <Button variant="outline" onClick={() => navigate("/onboarding/restore")}>
               Back
             </Button>
             <Button onClick={() => void handleContinue()} disabled={loading || !mnemonic.trim()}>

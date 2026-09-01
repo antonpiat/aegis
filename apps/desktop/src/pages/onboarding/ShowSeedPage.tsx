@@ -3,6 +3,7 @@ import { useNavigate } from "react-router-dom";
 import { MaskedPhrase } from "@/components/MaskedPhrase";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Alert } from "@/components/ui/misc";
 import { ApiError, walletApi } from "@/lib/tauri";
 
@@ -11,6 +12,7 @@ export function ShowSeedPage() {
   const [mnemonic, setMnemonic] = useState("");
   const [loading, setLoading] = useState(true);
   const [regenerating, setRegenerating] = useState(false);
+  const [stored, setStored] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const words = useMemo(() => mnemonic.split(/\s+/).filter(Boolean), [mnemonic]);
 
@@ -45,7 +47,7 @@ export function ShowSeedPage() {
     setError(null);
     try {
       const phrase = await walletApi.generateMnemonic();
-      await walletApi.setOnboardingDraft(phrase, "create");
+      await walletApi.setOnboardingDraft({ mnemonic: phrase, mode: "create" });
       setMnemonic(phrase);
     } catch (err) {
       const apiError = err as ApiError;
@@ -68,6 +70,14 @@ export function ShowSeedPage() {
           </Alert>
           <MaskedPhrase words={words} />
           {error && <Alert className="border-destructive/40 text-destructive">{error}</Alert>}
+          <label className="flex cursor-pointer items-start gap-2.5 text-sm">
+            <Checkbox
+              checked={stored}
+              onCheckedChange={setStored}
+              aria-label="I stored this phrase offline"
+            />
+            <span>I stored this phrase offline</span>
+          </label>
           <div className="flex flex-wrap gap-3">
             <Button variant="outline" onClick={() => navigate("/onboarding")}>
               Back
@@ -79,7 +89,7 @@ export function ShowSeedPage() {
             >
               {regenerating ? "Generating..." : "Generate New Phrase"}
             </Button>
-            <Button onClick={() => navigate("/onboarding/confirm")} disabled={regenerating}>
+            <Button onClick={() => navigate("/onboarding/password")} disabled={regenerating || !stored}>
               I wrote it down
             </Button>
           </div>

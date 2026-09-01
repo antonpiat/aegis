@@ -3,29 +3,12 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/misc";
 import { PageHeader } from "@/components/PageHeader";
+import { TokenIcon } from "@/components/TokenIcon";
 import { useWallet } from "@/context/WalletContext";
-import { localLogoForMint, withLocalLogo, WRAPPED_SOL } from "@/lib/tokenCatalog";
+import { findNetwork } from "@/lib/network";
+import { networkFamilyToChain, withLocalLogo } from "@/lib/tokenCatalog";
 import { formatNative, formatUsdMaybeHidden, formatHiddenBalance, shortenAddress } from "@/lib/utils";
 import { Copy, Eye, EyeOff, RefreshCw } from "lucide-react";
-
-function TokenAvatar({ symbol, logoUri }: { symbol: string; logoUri: string | null }) {
-  if (logoUri) {
-    return (
-      <img
-        src={logoUri}
-        alt={symbol}
-        className="h-9 w-9 shrink-0 rounded-full border border-border bg-background object-cover"
-        loading="eager"
-        decoding="async"
-      />
-    );
-  }
-  return (
-    <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full border border-border bg-secondary text-xs font-semibold">
-      {symbol.slice(0, 2).toUpperCase()}
-    </div>
-  );
-}
 
 function Skeleton({ className }: { className?: string }) {
   return <div className={`animate-pulse rounded-md bg-secondary/80 ${className ?? ""}`} />;
@@ -33,14 +16,10 @@ function Skeleton({ className }: { className?: string }) {
 
 export function DashboardPage() {
   const {
-    nativeBalance,
-    nativeSymbol,
-    nativePriceUsd,
-    nativeValueUsd,
+    chains,
     totalPortfolioUsd,
-    tokens,
     publicKey,
-    networkInfo,
+    networks,
     refresh,
     balancesLoading,
     hideBalances,
@@ -56,17 +35,13 @@ export function DashboardPage() {
   };
 
   const busy = refreshing || balancesLoading;
-  const showSkeleton = balancesLoading && nativeBalance === null;
+  const showSkeleton = balancesLoading && chains.length === 0;
 
   return (
     <div className="space-y-4 sm:space-y-6">
       <PageHeader
         title="Dashboard"
-        description={
-          balancesLoading
-            ? "Loading balances and token details…"
-            : "Portfolio value and token balances."
-        }
+        description={balancesLoading ? "Loading balances…" : "Portfolio by chain."}
         actions={
           <>
             <Button
@@ -79,17 +54,11 @@ export function DashboardPage() {
               className="flex-1 sm:flex-none"
               aria-pressed={hideBalances}
               aria-label={hideBalances ? "Show balances" : "Hide balances"}
-              title={hideBalances ? "Show balances" : "Hide balances"}
             >
               {hideBalances ? <Eye className="h-4 w-4" /> : <EyeOff className="h-4 w-4" />}
               {hideBalances ? "Show" : "Hide"}
             </Button>
-            <Button
-              variant="outline"
-              onClick={handleRefresh}
-              disabled={busy}
-              className="flex-1 sm:flex-none"
-            >
+            <Button variant="outline" onClick={handleRefresh} disabled={busy} className="flex-1 sm:flex-none">
               <RefreshCw className={`h-4 w-4 ${busy ? "animate-spin" : ""}`} />
               Refresh
             </Button>
@@ -108,133 +77,121 @@ export function DashboardPage() {
             )}
           </CardTitle>
         </CardHeader>
-        <CardContent className="space-y-3">
-          <div className="flex flex-col gap-3 rounded-lg border border-border bg-background/50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <TokenAvatar
-                symbol={nativeSymbol}
-                logoUri={nativeSymbol === "SOL" ? localLogoForMint(WRAPPED_SOL) : null}
-              />
-              <div className="min-w-0">
-                <p className="font-medium">{nativeSymbol}</p>
-                <p className="text-xs text-muted-foreground">
-                  {showSkeleton
-                    ? "Fetching price…"
-                    : nativePriceUsd !== null
-                      ? `${formatUsdMaybeHidden(hideBalances, nativePriceUsd)} / ${nativeSymbol}`
-                      : "Price unavailable"}
-                </p>
-              </div>
-            </div>
-            <div className="text-left sm:text-right">
-              {showSkeleton ? (
-                <>
-                  <Skeleton className="mb-1 h-5 w-28" />
-                  <Skeleton className="h-4 w-20" />
-                </>
-              ) : (
-                <>
-                  <p className="font-mono">
-                    {nativeBalance !== null
-                      ? formatHiddenBalance(hideBalances, formatNative(nativeBalance, nativeSymbol))
-                      : "—"}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {formatUsdMaybeHidden(hideBalances, nativeValueUsd)}
-                  </p>
-                </>
-              )}
-            </div>
-          </div>
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div className="truncate font-mono text-sm text-muted-foreground">
-              {publicKey ? shortenAddress(publicKey, 8) : "No address"}
-            </div>
-            {publicKey && (
-              <Button
-                variant="ghost"
-                size="sm"
-                className="w-full sm:w-auto"
-                onClick={() => navigator.clipboard.writeText(publicKey)}
-              >
-                <Copy className="h-4 w-4" />
-                Copy
-              </Button>
-            )}
-          </div>
-        </CardContent>
       </Card>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{networkInfo?.features.tokens ? "Tokens" : "Assets"}</CardTitle>
-          <CardDescription>
-            {networkInfo?.family === "bitcoin"
-              ? "Bitcoin has no token list in this wallet."
-              : "Balances with live USD prices when available."}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-3">
-          {showSkeleton ? (
-            Array.from({ length: 3 }).map((_, index) => (
-              <div
-                key={index}
-                className="flex items-center justify-between rounded-lg border border-border bg-background/50 px-3 py-3 sm:px-4"
-              >
-                <div className="flex items-center gap-3">
-                  <Skeleton className="h-9 w-9 rounded-full" />
-                  <div>
-                    <Skeleton className="mb-1 h-4 w-16" />
-                    <Skeleton className="h-3 w-24" />
+      {showSkeleton
+        ? Array.from({ length: 2 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="space-y-3 pt-6">
+                <Skeleton className="h-9 w-28" />
+                <Skeleton className="h-16 w-full" />
+              </CardContent>
+            </Card>
+          ))
+        : chains.map((chain) => {
+            const info = findNetwork(networks, chain.network);
+            const tokenChain = networkFamilyToChain(info?.family);
+            const tokens = chain.tokens ?? [];
+            return (
+              <Card key={chain.network}>
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2 text-lg">
+                    <TokenIcon
+                      symbol={chain.native_symbol}
+                      mint={chain.native_symbol.toLowerCase()}
+                      chain={tokenChain}
+                      size={28}
+                    />
+                    {info?.name ?? chain.native_symbol}
+                  </CardTitle>
+                  <CardDescription className="flex items-center justify-between gap-2 font-mono text-xs">
+                    <span className="truncate">
+                      {chain.public_key ? shortenAddress(chain.public_key, 8) : "—"}
+                    </span>
+                    {chain.public_key && (
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        onClick={() => void navigator.clipboard.writeText(chain.public_key ?? "")}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                        Copy
+                      </Button>
+                    )}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-3">
+                  <div className="flex flex-col gap-3 rounded-lg border border-border bg-background/50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+                    <div className="flex min-w-0 items-center gap-3">
+                      <TokenIcon
+                        symbol={chain.native_symbol}
+                        mint={chain.native_symbol.toLowerCase()}
+                        chain={tokenChain}
+                        size={36}
+                      />
+                      <div className="min-w-0">
+                        <p className="font-medium">{chain.native_symbol}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {chain.native_price_usd !== null
+                            ? `${formatUsdMaybeHidden(hideBalances, chain.native_price_usd)} / ${chain.native_symbol}`
+                            : "Price unavailable"}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="text-left sm:text-right">
+                      <p className="font-mono">
+                        {chain.native_balance !== null
+                          ? formatHiddenBalance(
+                              hideBalances,
+                              formatNative(chain.native_balance, chain.native_symbol),
+                            )
+                          : "—"}
+                      </p>
+                      <p className="text-sm text-muted-foreground">
+                        {formatUsdMaybeHidden(hideBalances, chain.native_value_usd)}
+                      </p>
+                    </div>
                   </div>
-                </div>
-                <div className="text-right">
-                  <Skeleton className="mb-1 ml-auto h-4 w-20" />
-                  <Skeleton className="ml-auto h-3 w-14" />
-                </div>
-              </div>
-            ))
-          ) : tokens.length === 0 ? (
-            <p className="text-sm text-muted-foreground">
-              {networkInfo?.family === "bitcoin"
-                ? "Native Bitcoin only."
-                : "No token balances found."}
-            </p>
-          ) : (
-            tokens.map((token) => (
-              <div
-                key={token.mint}
-                className="flex flex-col gap-3 rounded-lg border border-border bg-background/50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4"
-              >
-                <div className="flex min-w-0 items-center gap-3">
-                  <TokenAvatar
-                    symbol={token.symbol}
-                    logoUri={withLocalLogo(token).logo_uri}
-                  />
-                  <div className="min-w-0">
-                    <p className="font-medium">{token.symbol}</p>
-                    <p className="truncate text-xs text-muted-foreground">{token.name}</p>
-                  </div>
-                </div>
-                <div className="min-w-0 text-left sm:text-right">
-                  <p className="font-mono">
-                    {formatHiddenBalance(hideBalances, String(token.ui_amount))}
-                  </p>
-                  <p className="text-sm text-muted-foreground">
-                    {formatUsdMaybeHidden(hideBalances, token.value_usd)}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {token.price_usd !== null
-                      ? `${formatUsdMaybeHidden(hideBalances, token.price_usd)} / token`
-                      : "—"}
-                  </p>
-                  <Badge className="mt-1">{shortenAddress(token.mint)}</Badge>
-                </div>
-              </div>
-            ))
-          )}
-        </CardContent>
-      </Card>
+                  {tokens.map((token) => {
+                    const branded = withLocalLogo(token, tokenChain);
+                    return (
+                      <div
+                        key={token.mint}
+                        className="flex flex-col gap-3 rounded-lg border border-border bg-background/50 px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4"
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <TokenIcon
+                            symbol={token.symbol}
+                            mint={token.mint}
+                            chain={tokenChain}
+                            logoUri={branded.logo_uri}
+                            size={36}
+                          />
+                          <div className="min-w-0">
+                            <p className="font-medium">{token.symbol}</p>
+                            <p className="truncate text-xs text-muted-foreground">{token.name}</p>
+                          </div>
+                        </div>
+                        <div className="min-w-0 text-left sm:text-right">
+                          <p className="font-mono">
+                            {formatHiddenBalance(hideBalances, String(token.ui_amount))}
+                          </p>
+                          <p className="text-sm text-muted-foreground">
+                            {formatUsdMaybeHidden(hideBalances, token.value_usd)}
+                          </p>
+                          <Badge className="mt-1">{shortenAddress(token.mint)}</Badge>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </CardContent>
+              </Card>
+            );
+          })}
+
+      {!showSkeleton && chains.length === 0 && publicKey && (
+        <p className="text-sm text-muted-foreground">No balances yet. Activate a network in Settings.</p>
+      )}
     </div>
   );
 }

@@ -12,7 +12,14 @@ import { normalizeExplorer } from "@/lib/explorer";
 import { normalizeAppView, restoreSavedWindowSize } from "@/lib/appView";
 import { DEFAULT_AUTO_LOCK_MINUTES, normalizeAutoLockMinutes } from "@/lib/autoLock";
 import { DEFAULT_NETWORK_ID, findNetwork, normalizeNetworkId } from "@/lib/network";
-import type { AppSettings, ExplorerKind, NetworkInfo, RuntimeConfig } from "@/lib/tauri";
+import type {
+  AppSettings,
+  ChainSnapshot,
+  ExplorerKind,
+  ImportKind,
+  NetworkInfo,
+  RuntimeConfig,
+} from "@/lib/tauri";
 import { TokenBalance, walletApi } from "@/lib/tauri";
 
 const DEFAULT_SETTINGS: AppSettings = {
@@ -20,6 +27,8 @@ const DEFAULT_SETTINGS: AppSettings = {
   rpc_urls: {},
   jupiter_api_key: null,
   network: DEFAULT_NETWORK_ID,
+  enabled_networks: ["solana-mainnet", "ethereum-mainnet", "bitcoin-mainnet"],
+  zerox_api_key: null,
   auto_lock_minutes: DEFAULT_AUTO_LOCK_MINUTES,
   hide_balances: true,
   explorer: "solscan",
@@ -45,6 +54,11 @@ interface WalletContextValue {
   nativeValueUsd: number | null;
   totalPortfolioUsd: number | null;
   tokens: TokenBalance[];
+  chains: ChainSnapshot[];
+  accountName: string;
+  importKind: ImportKind;
+  canRevealMnemonic: boolean;
+  enabledNetworks: string[];
   settings: AppSettings;
   hideBalances: boolean;
   explorer: ExplorerKind;
@@ -55,6 +69,7 @@ interface WalletContextValue {
   saveSettings: (next: AppSettings) => Promise<RuntimeConfig>;
   setHideBalances: (hidden: boolean) => Promise<void>;
   changeNetwork: (network: string) => Promise<RuntimeConfig>;
+  setEnabledNetworks: (networks: string[]) => Promise<RuntimeConfig>;
 }
 
 const WalletContext = createContext<WalletContextValue | null>(null);
@@ -74,6 +89,13 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
   const [nativeValueUsd, setNativeValueUsd] = useState<number | null>(null);
   const [totalPortfolioUsd, setTotalPortfolioUsd] = useState<number | null>(null);
   const [tokens, setTokens] = useState<TokenBalance[]>([]);
+  const [chains, setChains] = useState<ChainSnapshot[]>([]);
+  const [accountName, setAccountName] = useState("Account 1");
+  const [importKind, setImportKind] = useState<ImportKind>("mnemonic");
+  const [canRevealMnemonic, setCanRevealMnemonic] = useState(false);
+  const [enabledNetworks, setEnabledNetworksState] = useState<string[]>(
+    DEFAULT_SETTINGS.enabled_networks ?? [],
+  );
   const [settings, setSettings] = useState<AppSettings>(DEFAULT_SETTINGS);
   const refreshPromise = useRef<Promise<void> | null>(null);
   const idleTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -104,6 +126,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       setNativeValueUsd(snapshot.native_value_usd);
       setTotalPortfolioUsd(snapshot.total_portfolio_usd);
       setTokens(snapshot.tokens ?? []);
+      setChains(snapshot.chains ?? []);
+      setAccountName(snapshot.account_name || "Account 1");
+      setImportKind(snapshot.import_kind ?? "mnemonic");
+      setCanRevealMnemonic(Boolean(snapshot.can_reveal_mnemonic));
+      setEnabledNetworksState(snapshot.enabled_networks ?? DEFAULT_SETTINGS.enabled_networks ?? []);
     },
     [],
   );
@@ -150,6 +177,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
         auto_lock_minutes: normalizeAutoLockMinutes(next.auto_lock_minutes),
         network: normalizeNetworkId(next.network ?? DEFAULT_SETTINGS.network),
         rpc_urls: next.rpc_urls ?? {},
+        enabled_networks: next.enabled_networks ?? DEFAULT_SETTINGS.enabled_networks,
+        zerox_api_key: next.zerox_api_key ?? null,
         swap_favorite_tokens: next.swap_favorite_tokens ?? [],
       };
       setSettings(merged);
@@ -167,6 +196,8 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       app_view: normalizeAppView(next.app_view),
       auto_lock_minutes: normalizeAutoLockMinutes(next.auto_lock_minutes),
       network: normalizeNetworkId(next.network),
+      enabled_networks: next.enabled_networks ?? DEFAULT_SETTINGS.enabled_networks,
+      zerox_api_key: next.zerox_api_key ?? null,
     };
     const runtime = await walletApi.updateAppSettings(payload);
     setSettings(payload);
@@ -199,6 +230,17 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     [refresh, reloadSettings],
   );
 
+  const setEnabledNetworks = useCallback(
+    async (next: string[]) => {
+      const runtime = await walletApi.setEnabledNetworks(next);
+      setEnabledNetworksState(next);
+      void reloadSettings();
+      void refresh();
+      return runtime;
+    },
+    [refresh, reloadSettings],
+  );
+
   const lock = useCallback(async () => {
     if (idleTimer.current) {
       clearTimeout(idleTimer.current);
@@ -212,6 +254,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
     setNativeValueUsd(null);
     setTotalPortfolioUsd(null);
     setTokens([]);
+    setChains([]);
     setBalancesLoading(false);
   }, []);
 
@@ -311,6 +354,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       nativeValueUsd,
       totalPortfolioUsd,
       tokens,
+      chains,
+      accountName,
+      importKind,
+      canRevealMnemonic,
+      enabledNetworks,
       settings,
       hideBalances: Boolean(settings.hide_balances),
       explorer: normalizeExplorer(settings.explorer),
@@ -321,6 +369,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       saveSettings,
       setHideBalances,
       changeNetwork,
+      setEnabledNetworks,
     }),
     [
       loading,
@@ -337,6 +386,11 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       nativeValueUsd,
       totalPortfolioUsd,
       tokens,
+      chains,
+      accountName,
+      importKind,
+      canRevealMnemonic,
+      enabledNetworks,
       settings,
       refresh,
       refreshBalances,
@@ -345,6 +399,7 @@ export function WalletProvider({ children }: { children: React.ReactNode }) {
       saveSettings,
       setHideBalances,
       changeNetwork,
+      setEnabledNetworks,
     ],
   );
 

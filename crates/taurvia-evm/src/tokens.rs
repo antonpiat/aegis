@@ -6,9 +6,9 @@ pub struct CuratedToken {
     pub symbol: &'static str,
     pub name: &'static str,
     pub decimals: u8,
+    pub logo_uri: Option<&'static str>,
 }
 
-/// Ethereum mainnet curated set. L2s can swap this list later via descriptor id.
 pub fn curated_tokens(network_id: &str) -> &'static [CuratedToken] {
     match network_id {
         "ethereum-mainnet" => ETHEREUM_MAINNET,
@@ -16,38 +16,68 @@ pub fn curated_tokens(network_id: &str) -> &'static [CuratedToken] {
     }
 }
 
+const TW_WETH: &str = "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2/logo.png";
+const TW_USDC: &str = "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48/logo.png";
+const TW_USDT: &str = "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0xdAC17F958D2ee523a2206206994597C13D831ec7/logo.png";
+const TW_DAI: &str = "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x6B175474E89094C44Da98b954EedeAC495271d0F/logo.png";
+const TW_WBTC: &str = "https://raw.githubusercontent.com/trustwallet/assets/master/blockchains/ethereum/assets/0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599/logo.png";
+
 const ETHEREUM_MAINNET: &[CuratedToken] = &[
     CuratedToken {
         address: "0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2",
         symbol: "WETH",
         name: "Wrapped Ether",
         decimals: 18,
+        logo_uri: Some(TW_WETH),
     },
     CuratedToken {
         address: "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
         symbol: "USDC",
         name: "USD Coin",
         decimals: 6,
+        logo_uri: Some(TW_USDC),
     },
     CuratedToken {
         address: "0xdAC17F958D2ee523a2206206994597C13D831ec7",
         symbol: "USDT",
         name: "Tether USD",
         decimals: 6,
+        logo_uri: Some(TW_USDT),
     },
     CuratedToken {
         address: "0x6B175474E89094C44Da98b954EedeAC495271d0F",
         symbol: "DAI",
         name: "Dai Stablecoin",
         decimals: 18,
+        logo_uri: Some(TW_DAI),
     },
     CuratedToken {
         address: "0x2260FAC5E5542a773Aa44fBCfeDf7C193bc2C599",
         symbol: "WBTC",
         name: "Wrapped BTC",
         decimals: 8,
+        logo_uri: Some(TW_WBTC),
     },
 ];
+
+pub fn token_info(token: &CuratedToken) -> models::TokenInfo {
+    models::TokenInfo {
+        mint: token.address.to_string(),
+        symbol: token.symbol.to_string(),
+        name: token.name.to_string(),
+        decimals: token.decimals,
+        logo_uri: token.logo_uri.map(|s| s.to_string()),
+    }
+}
+
+pub fn resolve_curated(network_id: &str, asset: &str) -> Option<&'static CuratedToken> {
+    if asset.eq_ignore_ascii_case("eth") || asset.eq_ignore_ascii_case("native") {
+        return None;
+    }
+    curated_tokens(network_id)
+        .iter()
+        .find(|t| t.address.eq_ignore_ascii_case(asset))
+}
 
 pub fn token_balance(
     token: &CuratedToken,
@@ -65,7 +95,7 @@ pub fn token_balance(
         amount: raw.to_string(),
         decimals: token.decimals,
         ui_amount: ui,
-        logo_uri: None,
+        logo_uri: token.logo_uri.map(|s| s.to_string()),
         price_usd,
         value_usd: price_usd.map(|p| p * ui),
     })

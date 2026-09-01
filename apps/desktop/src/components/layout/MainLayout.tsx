@@ -17,7 +17,7 @@ import { BrandMark } from "@/components/BrandMark";
 import { Button } from "@/components/ui/button";
 import { useWallet } from "@/context/WalletContext";
 import { normalizeAppView, useLayoutMode, useSyncAppViewOnResize } from "@/lib/appView";
-import { canSwap, productChainLabel, networkShortLabel } from "@/lib/network";
+import { canSwapAny, networkShortLabel } from "@/lib/network";
 import {
   DEFAULT_SETTINGS_SECTION,
   SETTINGS_SECTIONS,
@@ -43,6 +43,10 @@ export function MainLayout() {
     hideBalances,
     network,
     networkInfo,
+    networks,
+    accountName,
+    enabledNetworks,
+    changeNetwork,
     settings,
     saveSettings,
   } = useWallet();
@@ -51,8 +55,12 @@ export function MainLayout() {
   const isCompact = layout === "compact";
   const isDesktop = layout === "desktop";
   const networkLabel = networkShortLabel(networkInfo, network);
-  const chainLabel = productChainLabel(networkInfo);
-  const visibleNav = navItems.filter((item) => !item.mainnetOnly || canSwap(networkInfo));
+  const visibleNav = navItems.filter(
+    (item) => !item.mainnetOnly || canSwapAny(enabledNetworks, networks),
+  );
+  const switchable = networks.filter(
+    (n) => n.enabled && enabledNetworks.includes(n.id) && !n.is_testnet,
+  );
   const [copied, setCopied] = useState(false);
   const [settingsExpanded, setSettingsExpanded] = useState(false);
   const wasOnSettings = useRef(false);
@@ -135,7 +143,7 @@ export function MainLayout() {
             {isDesktop && (
               <div className="min-w-0">
                 <p className="text-lg font-semibold">Taurvia</p>
-                <p className="text-xs text-muted-foreground">{chainLabel}</p>
+                <p className="truncate text-xs text-muted-foreground">{accountName}</p>
               </div>
             )}
           </div>
@@ -278,7 +286,8 @@ export function MainLayout() {
                       <Wallet className="h-4 w-4 text-foreground" />
                     </span>
                     <span className="min-w-0 flex-1">
-                      <span className="block font-mono text-sm text-foreground">
+                      <span className="block truncate text-sm text-foreground">{accountName}</span>
+                      <span className="block font-mono text-[11px] text-muted-foreground">
                         {shortenAddress(publicKey, 4)}
                       </span>
                       <span className="block truncate text-[11px] text-muted-foreground">
@@ -297,6 +306,26 @@ export function MainLayout() {
                       )}
                     </span>
                   </button>
+
+                  {switchable.length > 1 && (
+                    <div className="flex flex-wrap gap-1">
+                      {switchable.map((n) => (
+                        <button
+                          key={n.id}
+                          type="button"
+                          onClick={() => void changeNetwork(n.id)}
+                          className={cn(
+                            "rounded-full border px-2 py-0.5 text-[11px]",
+                            n.id === network
+                              ? "border-primary bg-primary/15 text-primary"
+                              : "border-border text-muted-foreground hover:bg-accent",
+                          )}
+                        >
+                          {n.native_symbol}
+                        </button>
+                      ))}
+                    </div>
+                  )}
 
                   <div className="grid grid-cols-2 gap-2">
                     <Button

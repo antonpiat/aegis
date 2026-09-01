@@ -5,13 +5,11 @@ use crypto::{
     KDF_NAME, KEY_LEN, NONCE_LEN,
 };
 use models::{
-    CryptoEnvelope, EncryptedPayload, WalletAddresses, WalletFile, WalletProtection,
-    DEFAULT_DERIVATION_PATH, MIN_WALLET_FILE_VERSION, WALLET_FILE_VERSION,
+    CryptoEnvelope, EncryptedPayload, ImportKind, WalletFile, WalletProtection,
+    DEFAULT_ACCOUNT_NAME, DEFAULT_DERIVATION_PATH, MIN_WALLET_FILE_VERSION, WALLET_FILE_VERSION,
 };
 use storage::DeviceSecretError;
-use taurvia_solana::{
-    keypair_from_base64, keypair_to_base64, Keypair, Signer,
-};
+use taurvia_solana::{keypair_from_base64, keypair_from_secret_input, keypair_to_base64};
 use uuid::Uuid;
 use zeroize::Zeroize;
 
@@ -27,20 +25,72 @@ impl WalletService {
         taurvia_hd::validate_mnemonic(mnemonic).map_err(|_| WalletError::InvalidMnemonic)
     }
 
-    pub fn create_wallet(&self, mnemonic: &str, password: &str) -> Result<WalletFile, WalletError> {
+    pub fn create_wallet(
+        &self,
+        mnemonic: &str,
+        password: &str,
+        account_name: &str,
+    ) -> Result<WalletFile, WalletError> {
         if self.storage.exists() {
             return Err(WalletError::AlreadyExists);
         }
         Self::require_password_strength(password)?;
-        self.save_wallet_from_mnemonic(mnemonic, password)
+        self.save_wallet_from_mnemonic(mnemonic, password, account_name)
     }
 
-    pub fn import_wallet(&self, mnemonic: &str, password: &str) -> Result<WalletFile, WalletError> {
+    pub fn import_wallet(
+        &self,
+        mnemonic: &str,
+        password: &str,
+        account_name: &str,
+    ) -> Result<WalletFile, WalletError> {
         if self.storage.exists() {
             return Err(WalletError::AlreadyExists);
         }
         Self::require_password_strength(password)?;
-        self.save_wallet_from_mnemonic(mnemonic, password)
+        self.save_wallet_from_mnemonic(mnemonic, password, account_name)
+    }
+
+    pub fn import_private_key(
+        &self,
+        secret: &str,
+        password: &str,
+        account_name: &str,
+    ) -> Result<WalletFile, WalletError> {
+        if self.storage.exists() {
+            return Err(WalletError::AlreadyExists);
+        }
+        Self::require_password_strength(password)?;
+        let trimmed = secret.trim();
+        if trimmed.is_empty() {
+            return Err(WalletError::Operation(anyhow::anyhow!(
+                "private key is required"
+            )));
+        }
+
+        let (keyring, kind, stored_secret) = detect_and_parse_key(trimmed)?;
+        let payload = EncryptedPayload {
+            mnemonic: String::new(),
+            private_key: stored_secret,
+            derivation_path: DEFAULT_DERIVATION_PATH.to_string(),
+        };
+        let network = models::mainnet_id_for_family(
+            kind.family()
+                .unwrap_or(models::ChainFamily::Solana),
+        )
+        .to_string();
+        let wallet = self.encrypt_wallet_file(
+            &keyring,
+            &payload,
+            password,
+            &network,
+            account_name,
+            kind,
+            kind.default_enabled_networks(),
+        )?;
+        self.storage.save(&wallet)?;
+        *self.cached_wallet.lock().unwrap() = Some(wallet.clone());
+        Ok(wallet)
     }
 
     /// Restore from an exported wallet JSON + password (password-only backups).
@@ -56,7 +106,6 @@ impl WalletService {
         let wallet: WalletFile = serde_json::from_str(wallet_json).map_err(|e| {
             WalletError::Operation(anyhow::anyhow!("invalid wallet backup JSON: {e}"))
         })?;
-        // Prove password (and device secret if bound) before installing.
         let _payload = self.decrypt_payload(&wallet, password)?;
         self.storage.save(&wallet)?;
         *self.cached_wallet.lock().unwrap() = Some(wallet.clone());
@@ -67,27 +116,28 @@ impl WalletService {
     pub fn unlock(&self, password: &str) -> Result<String, WalletError> {
         let mut wallet = self.storage.load()?;
         let payload = self.decrypt_payload(&wallet, password)?;
-        let keypair = keypair_from_base64(&payload.private_key).map_err(WalletError::Operation)?;
-        let keyring = FamilyKeyring::from_solana_and_mnemonic(keypair, &payload.mnemonic)?;
+        let keyring = keyring_from_payload(&wallet, &payload)?;
         let desc = models::require_network(&wallet.network);
-        let public_key = keyring.address(desc.family, desc.is_testnet);
+        let public_key = keyring
+            .address(desc.family, desc.is_testnet)
+            .unwrap_or_else(|_| keyring.primary_address());
 
-        let mut addresses = wallet.addresses.clone();
-        addresses.set(
-            models::ChainFamily::Solana,
-            keyring.solana.pubkey().to_string(),
-        );
-        addresses.set(models::ChainFamily::Evm, keyring.evm.address.clone());
-        addresses.set(
-            models::ChainFamily::Bitcoin,
-            keyring.bitcoin.address.clone(),
-        );
+        let addresses = keyring.addresses();
         let needs_upgrade = wallet.version < WALLET_FILE_VERSION
-            || wallet.addresses.evm.is_none()
-            || wallet.addresses.bitcoin.is_none();
+            || wallet.account_name.is_empty()
+            || wallet.enabled_networks.is_empty();
         if needs_upgrade {
             wallet.version = WALLET_FILE_VERSION;
             wallet.addresses = addresses;
+            if wallet.account_name.is_empty() {
+                wallet.account_name = DEFAULT_ACCOUNT_NAME.to_string();
+            }
+            if wallet.enabled_networks.is_empty() {
+                wallet.enabled_networks = wallet.import_kind.default_enabled_networks();
+            }
+            if !payload.mnemonic.is_empty() {
+                wallet.import_kind = ImportKind::Mnemonic;
+            }
             self.storage.save(&wallet)?;
         }
 
@@ -97,8 +147,9 @@ impl WalletService {
 
         let network = models::normalize_network_id(&wallet.network).to_string();
         let mut settings = self.get_settings();
-        if settings.network != network {
+        if settings.network != network || settings.enabled_networks != wallet.enabled_networks {
             settings.network = network;
+            settings.enabled_networks = wallet.enabled_networks.clone();
             let _ = self.update_settings(settings);
         }
 
@@ -110,27 +161,25 @@ impl WalletService {
         if !self.is_unlocked() {
             return Err(WalletError::Locked);
         }
-        let wallet = self
-            .cached_wallet
-            .lock()
-            .unwrap()
-            .clone()
-            .or_else(|| self.storage.load().ok())
-            .ok_or(WalletError::NotFound)?;
+        let wallet = self.cached_or_disk().ok_or(WalletError::NotFound)?;
+        if !wallet.import_kind.has_mnemonic() {
+            return Err(WalletError::Operation(anyhow::anyhow!(
+                "this wallet has no recovery phrase"
+            )));
+        }
         let payload = self.decrypt_payload(&wallet, password)?;
+        if payload.mnemonic.is_empty() {
+            return Err(WalletError::Operation(anyhow::anyhow!(
+                "this wallet has no recovery phrase"
+            )));
+        }
         Ok(payload.mnemonic)
     }
 
     /// Delete the local wallet without the password (forgot-password / factory reset).
     /// Funds are only recoverable via recovery phrase or a portable backup.
     pub fn reset_local_wallet(&self) -> Result<(), WalletError> {
-        let wallet = self
-            .cached_wallet
-            .lock()
-            .unwrap()
-            .clone()
-            .or_else(|| self.storage.load().ok())
-            .ok_or(WalletError::NotFound)?;
+        let wallet = self.cached_or_disk().ok_or(WalletError::NotFound)?;
         self.wipe_local_wallet(&wallet.wallet_id)
     }
 
@@ -147,19 +196,11 @@ impl WalletService {
         new_password: &str,
     ) -> Result<(), WalletError> {
         Self::require_password_strength(new_password)?;
-        let wallet = self
-            .cached_wallet
-            .lock()
-            .unwrap()
-            .clone()
-            .or_else(|| self.storage.load().ok())
-            .ok_or(WalletError::NotFound)?;
+        let wallet = self.cached_or_disk().ok_or(WalletError::NotFound)?;
         let payload = self.decrypt_payload(&wallet, old_password)?;
-        let keypair = keypair_from_base64(&payload.private_key).map_err(WalletError::Operation)?;
         let device_secret = self.resolve_device_secret_for_write(&wallet)?;
         let updated = self.reencrypt_wallet_file(
             &wallet,
-            &keypair,
             &payload,
             new_password,
             wallet.protection,
@@ -171,13 +212,7 @@ impl WalletService {
     }
 
     pub fn export_wallet(&self, password: &str) -> Result<String, WalletError> {
-        let wallet = self
-            .cached_wallet
-            .lock()
-            .unwrap()
-            .clone()
-            .or_else(|| self.storage.load().ok())
-            .ok_or(WalletError::NotFound)?;
+        let wallet = self.cached_or_disk().ok_or(WalletError::NotFound)?;
         self.decrypt_payload(&wallet, password)?;
         serde_json::to_string_pretty(&wallet).map_err(|e| {
             WalletError::Operation(anyhow::anyhow!("failed to serialize wallet file: {e}"))
@@ -186,25 +221,17 @@ impl WalletService {
 
     /// Enable Enhanced device protection (re-encrypt with OS-bound secret).
     pub fn enable_device_protection(&self, password: &str) -> Result<WalletFile, WalletError> {
-        let wallet = self
-            .cached_wallet
-            .lock()
-            .unwrap()
-            .clone()
-            .or_else(|| self.storage.load().ok())
-            .ok_or(WalletError::NotFound)?;
+        let wallet = self.cached_or_disk().ok_or(WalletError::NotFound)?;
         if wallet.protection.is_device_bound() {
             return Ok(wallet);
         }
         let payload = self.decrypt_payload(&wallet, password)?;
-        let keypair = keypair_from_base64(&payload.private_key).map_err(WalletError::Operation)?;
         let mut secret = generate_device_secret();
         self.device_secrets
             .set(&wallet.wallet_id, &secret)
             .map_err(Self::map_device_secret_error)?;
         let updated = self.reencrypt_wallet_file(
             &wallet,
-            &keypair,
             &payload,
             password,
             WalletProtection::PasswordDevice,
@@ -219,21 +246,13 @@ impl WalletService {
 
     /// Disable Enhanced device protection (password-only portable encryption).
     pub fn disable_device_protection(&self, password: &str) -> Result<WalletFile, WalletError> {
-        let wallet = self
-            .cached_wallet
-            .lock()
-            .unwrap()
-            .clone()
-            .or_else(|| self.storage.load().ok())
-            .ok_or(WalletError::NotFound)?;
+        let wallet = self.cached_or_disk().ok_or(WalletError::NotFound)?;
         if !wallet.protection.is_device_bound() {
             return Ok(wallet);
         }
         let payload = self.decrypt_payload(&wallet, password)?;
-        let keypair = keypair_from_base64(&payload.private_key).map_err(WalletError::Operation)?;
         let updated = self.reencrypt_wallet_file(
             &wallet,
-            &keypair,
             &payload,
             password,
             WalletProtection::Password,
@@ -259,16 +278,30 @@ impl WalletService {
         &self,
         mnemonic: &str,
         password: &str,
+        account_name: &str,
     ) -> Result<WalletFile, WalletError> {
         let keyring =
             FamilyKeyring::from_mnemonic(mnemonic).map_err(|_| WalletError::InvalidMnemonic)?;
+        let private_key = keypair_to_base64(keyring.require_solana()?);
         let payload = EncryptedPayload {
             mnemonic: mnemonic.to_string(),
-            private_key: keypair_to_base64(&keyring.solana),
+            private_key,
             derivation_path: DEFAULT_DERIVATION_PATH.to_string(),
         };
-        let network = models::normalize_network_id(&self.get_settings().network).to_string();
-        let wallet = self.encrypt_wallet_file(&keyring, &payload, password, &network)?;
+        let mut network = models::normalize_network_id(&self.get_settings().network).to_string();
+        let enabled = ImportKind::Mnemonic.default_enabled_networks();
+        if !enabled.iter().any(|id| id == &network) {
+            network = models::NETWORK_SOLANA_MAINNET.to_string();
+        }
+        let wallet = self.encrypt_wallet_file(
+            &keyring,
+            &payload,
+            password,
+            &network,
+            account_name,
+            ImportKind::Mnemonic,
+            enabled,
+        )?;
         self.storage.save(&wallet)?;
         *self.cached_wallet.lock().unwrap() = Some(wallet.clone());
         Ok(wallet)
@@ -287,32 +320,36 @@ impl WalletService {
         Ok(())
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn encrypt_wallet_file(
         &self,
         keyring: &FamilyKeyring,
         payload: &EncryptedPayload,
         password: &str,
         network: &str,
+        account_name: &str,
+        import_kind: ImportKind,
+        enabled_networks: Vec<String>,
     ) -> Result<WalletFile, WalletError> {
-        let mut addresses = WalletAddresses::default();
-        addresses.set(
-            models::ChainFamily::Solana,
-            keyring.solana.pubkey().to_string(),
-        );
-        addresses.set(models::ChainFamily::Evm, keyring.evm.address.clone());
-        addresses.set(
-            models::ChainFamily::Bitcoin,
-            keyring.bitcoin.address.clone(),
-        );
+        let name = account_name.trim();
+        let account_name = if name.is_empty() {
+            DEFAULT_ACCOUNT_NAME.to_string()
+        } else {
+            name.chars().take(32).collect()
+        };
+        let addresses = keyring.addresses();
         self.reencrypt_wallet_file(
             &WalletFile {
                 version: WALLET_FILE_VERSION,
                 wallet_id: Uuid::new_v4().to_string(),
                 network: network.to_string(),
-                public_key: keyring.solana.pubkey().to_string(),
+                public_key: keyring.primary_address(),
                 created_at: Utc::now().to_rfc3339(),
                 protection: WalletProtection::Password,
                 addresses,
+                account_name,
+                import_kind,
+                enabled_networks,
                 crypto: CryptoEnvelope {
                     kdf: KDF_NAME.into(),
                     salt: String::new(),
@@ -321,7 +358,6 @@ impl WalletService {
                     ciphertext: String::new(),
                 },
             },
-            &keyring.solana,
             payload,
             password,
             WalletProtection::Password,
@@ -332,7 +368,6 @@ impl WalletService {
     fn reencrypt_wallet_file(
         &self,
         existing: &WalletFile,
-        keypair: &Keypair,
         payload: &EncryptedPayload,
         password: &str,
         protection: WalletProtection,
@@ -352,10 +387,13 @@ impl WalletService {
             version: WALLET_FILE_VERSION,
             wallet_id: existing.wallet_id.clone(),
             network: existing.network.clone(),
-            public_key: keypair.pubkey().to_string(),
+            public_key: existing.public_key.clone(),
             created_at: existing.created_at.clone(),
             protection,
             addresses: existing.addresses.clone(),
+            account_name: existing.account_name.clone(),
+            import_kind: existing.import_kind,
+            enabled_networks: existing.enabled_networks.clone(),
             crypto: CryptoEnvelope {
                 kdf: KDF_NAME.into(),
                 salt: BASE64.encode(salt),
@@ -428,13 +466,7 @@ impl WalletService {
     }
 
     pub(crate) fn verify_password(&self, password: &str) -> Result<(), WalletError> {
-        let wallet = self
-            .cached_wallet
-            .lock()
-            .unwrap()
-            .clone()
-            .or_else(|| self.storage.load().ok())
-            .ok_or(WalletError::NotFound)?;
+        let wallet = self.cached_or_disk().ok_or(WalletError::NotFound)?;
         self.decrypt_payload(&wallet, password)?;
         Ok(())
     }
@@ -448,4 +480,73 @@ impl WalletService {
             DeviceSecretError::Invalid => WalletError::DeviceSecretMissing,
         }
     }
+}
+
+fn keyring_from_payload(
+    wallet: &WalletFile,
+    payload: &EncryptedPayload,
+) -> Result<FamilyKeyring, WalletError> {
+    if !payload.mnemonic.is_empty() {
+        if payload.private_key.is_empty() {
+            return FamilyKeyring::from_mnemonic(&payload.mnemonic);
+        }
+        let keypair = keypair_from_base64(&payload.private_key).map_err(WalletError::Operation)?;
+        return FamilyKeyring::from_solana_and_mnemonic(keypair, &payload.mnemonic);
+    }
+    match wallet.import_kind {
+        ImportKind::Mnemonic => Err(WalletError::InvalidMnemonic),
+        ImportKind::SolanaKey => {
+            let keypair =
+                keypair_from_secret_input(&payload.private_key).map_err(WalletError::Operation)?;
+            Ok(FamilyKeyring::from_solana_key(keypair))
+        }
+        ImportKind::EvmKey => {
+            let signer = taurvia_evm::from_hex(&payload.private_key).map_err(WalletError::Operation)?;
+            Ok(FamilyKeyring::from_evm_key(signer))
+        }
+        ImportKind::BitcoinKey => {
+            let (main, test) =
+                taurvia_bitcoin::from_wif(&payload.private_key).map_err(WalletError::Operation)?;
+            Ok(FamilyKeyring::from_btc_keys(main, test))
+        }
+    }
+}
+
+fn detect_and_parse_key(secret: &str) -> Result<(FamilyKeyring, ImportKind, String), WalletError> {
+    let trimmed = secret.trim();
+    if trimmed.starts_with("0x") || trimmed.starts_with("0X") {
+        let signer = taurvia_evm::from_hex(trimmed).map_err(WalletError::Operation)?;
+        let hex = trimmed[2..].to_ascii_lowercase();
+        return Ok((
+            FamilyKeyring::from_evm_key(signer),
+            ImportKind::EvmKey,
+            format!("0x{hex}"),
+        ));
+    }
+    if let Ok((main, test)) = taurvia_bitcoin::from_wif(trimmed) {
+        return Ok((
+            FamilyKeyring::from_btc_keys(main, test),
+            ImportKind::BitcoinKey,
+            trimmed.to_string(),
+        ));
+    }
+    if trimmed.len() == 64 && trimmed.chars().all(|c| c.is_ascii_hexdigit()) {
+        let signer = taurvia_evm::from_hex(trimmed).map_err(WalletError::Operation)?;
+        return Ok((
+            FamilyKeyring::from_evm_key(signer),
+            ImportKind::EvmKey,
+            format!("0x{}", trimmed.to_ascii_lowercase()),
+        ));
+    }
+    if let Ok(kp) = keypair_from_secret_input(trimmed) {
+        let stored = keypair_to_base64(&kp);
+        return Ok((
+            FamilyKeyring::from_solana_key(kp),
+            ImportKind::SolanaKey,
+            stored,
+        ));
+    }
+    Err(WalletError::Operation(anyhow::anyhow!(
+        "unrecognized private key (Solana base58/JSON, Ethereum 0x hex, or Bitcoin WIF)"
+    )))
 }

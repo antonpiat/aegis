@@ -100,6 +100,11 @@ impl BtcRpc {
             native_value_usd,
             total_portfolio_usd: native_value_usd,
             tokens: Some(Vec::new()),
+            chains: Vec::new(),
+            account_name: String::new(),
+            import_kind: models::ImportKind::Mnemonic,
+            enabled_networks: Vec::new(),
+            can_reveal_mnemonic: false,
         })
     }
 
@@ -181,7 +186,7 @@ impl BtcRpc {
         amount_btc: f64,
     ) -> Result<SendPreview> {
         let (_selected, fee_sats, _change, _send_sats) =
-            self.select_coins(from, to, amount_btc).await?;
+            self.select_coins(from, to, amount_btc, None).await?;
         Ok(SendPreview {
             from: from.to_string(),
             to: to.to_string(),
@@ -200,7 +205,17 @@ impl BtcRpc {
         to: &str,
         amount_btc: f64,
     ) -> Result<SendResult> {
-        let (tx, _) = self.build_signed(signer, to, amount_btc).await?;
+        self.send_with_memo(signer, to, amount_btc, None).await
+    }
+
+    pub async fn send_with_memo(
+        &self,
+        signer: &BtcSigner,
+        to: &str,
+        amount_btc: f64,
+        memo: Option<&str>,
+    ) -> Result<SendResult> {
+        let (tx, _) = self.build_signed(signer, to, amount_btc, memo).await?;
         let hex = serialize_hex(&tx);
         let url = format!("{}/tx", self.esplora);
         let txid = taurvia_chain::http_client()
@@ -259,6 +274,7 @@ impl BtcRpc {
         from: &str,
         to: &str,
         amount_btc: f64,
+        memo: Option<&str>,
     ) -> Result<(Vec<EsploraUtxo>, u64, u64, u64)> {
         validate_address(to, self.descriptor.is_testnet)?;
         if amount_btc <= 0.0 {
@@ -271,14 +287,21 @@ impl BtcRpc {
         utxos.retain(|u| u.status.confirmed);
         utxos.sort_by_key(|u| std::cmp::Reverse(u.value));
 
+        let extra_outputs = 1.0 + if memo.is_some() { 1.0 } else { 0.0 };
+        let memo_vbytes = memo
+            .map(|m| 11.0 + m.len() as f64)
+            .unwrap_or(0.0);
+
         let mut selected = Vec::new();
         let mut total = 0u64;
         let mut fee = 0u64;
         for utxo in utxos {
             selected.push(utxo);
             total = selected.iter().map(|u| u.value).sum();
-            let vbytes =
-                OVERHEAD_VBYTES + INPUT_VBYTES * selected.len() as f64 + OUTPUT_VBYTES * 2.0;
+            let vbytes = OVERHEAD_VBYTES
+                + INPUT_VBYTES * selected.len() as f64
+                + OUTPUT_VBYTES * extra_outputs
+                + memo_vbytes;
             fee = (vbytes * fee_rate).ceil() as u64;
             if total >= send_sats.saturating_add(fee) {
                 break;
@@ -296,9 +319,10 @@ impl BtcRpc {
         signer: &BtcSigner,
         to: &str,
         amount_btc: f64,
+        memo: Option<&str>,
     ) -> Result<(Transaction, u64)> {
         let (selected, fee, change, send_sats) =
-            self.select_coins(&signer.address, to, amount_btc).await?;
+            self.select_coins(&signer.address, to, amount_btc, memo).await?;
 
         let dest: Address = Address::from_str(to)
             .map_err(|e| anyhow!("invalid recipient: {e}"))?
@@ -316,6 +340,19 @@ impl BtcRpc {
             outputs.push(TxOut {
                 value: Amount::from_sat(change),
                 script_pubkey: change_addr.script_pubkey(),
+            });
+        }
+        if let Some(memo) = memo {
+            if memo.len() > 80 {
+                bail!("Thorchain memo is too long for Bitcoin OP_RETURN");
+            }
+            let mut bytes = bitcoin::script::PushBytesBuf::new();
+            bytes
+                .extend_from_slice(memo.as_bytes())
+                .map_err(|_| anyhow!("invalid OP_RETURN memo"))?;
+            outputs.push(TxOut {
+                value: Amount::ZERO,
+                script_pubkey: ScriptBuf::new_op_return(bytes),
             });
         }
 
