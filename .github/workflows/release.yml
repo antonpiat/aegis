@@ -255,6 +255,7 @@ jobs:
       - name: Confirm Linux, Windows, and macOS assets
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.gate.outputs.tag }}
         run: |
           set -euo pipefail
@@ -267,5 +268,6 @@ jobs:
       - name: Mark release as published
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
           TAG: ${{ needs.gate.outputs.tag }}
         run: gh release edit "$TAG" --draft=false
