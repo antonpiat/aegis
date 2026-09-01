@@ -23,11 +23,12 @@ pub fn validate_mnemonic(mnemonic: String, state: State<'_, AppState>) -> Comman
 pub fn create_wallet(
     mnemonic: String,
     password: String,
+    account_name: String,
     state: State<'_, AppState>,
 ) -> CommandResult<WalletFile> {
     state
         .wallet
-        .create_wallet(&mnemonic, &password)
+        .create_wallet(&mnemonic, &password, &account_name)
         .map_err(map_wallet_error)
 }
 
@@ -36,11 +37,26 @@ pub fn create_wallet(
 pub fn import_wallet(
     mnemonic: String,
     password: String,
+    account_name: String,
     state: State<'_, AppState>,
 ) -> CommandResult<WalletFile> {
     state
         .wallet
-        .import_wallet(&mnemonic, &password)
+        .import_wallet(&mnemonic, &password, &account_name)
+        .map_err(map_wallet_error)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn import_private_key(
+    secret: String,
+    password: String,
+    account_name: String,
+    state: State<'_, AppState>,
+) -> CommandResult<WalletFile> {
+    state
+        .wallet
+        .import_private_key(&secret, &password, &account_name)
         .map_err(map_wallet_error)
 }
 
@@ -182,6 +198,24 @@ pub fn change_wallet_network(
         .wallet
         .change_network(&network)
         .map_err(map_wallet_error)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_enabled_networks(
+    networks: Vec<String>,
+    state: State<'_, AppState>,
+) -> CommandResult<RuntimeConfig> {
+    state
+        .wallet
+        .set_enabled_networks(&networks)
+        .map_err(map_wallet_error)
+}
+
+#[tauri::command]
+#[specta::specta]
+pub fn set_account_name(name: String, state: State<'_, AppState>) -> CommandResult<()> {
+    state.wallet.set_account_name(&name).map_err(map_wallet_error)
 }
 
 #[tauri::command]

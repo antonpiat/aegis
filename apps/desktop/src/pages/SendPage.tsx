@@ -18,15 +18,29 @@ import { useWallet } from "@/context/WalletContext";
 import { txExplorerUrl } from "@/lib/explorer";
 import { nativeAssetId } from "@/lib/network";
 import { ApiError, SendPreview, walletApi } from "@/lib/tauri";
-import { localLogoForMint, withLocalLogo, WRAPPED_SOL } from "@/lib/tokenCatalog";
+import { localLogoForAsset, networkFamilyToChain, withLocalLogo } from "@/lib/tokenCatalog";
 import { shortenAddress } from "@/lib/utils";
 
 export function SendPage() {
-  const { nativeBalance, nativeSymbol, tokens, refreshBalances, explorer, network, networkInfo } =
-    useWallet();
+  const {
+    nativeBalance,
+    nativeSymbol,
+    tokens,
+    refreshBalances,
+    explorer,
+    network,
+    networkInfo,
+    networks,
+    enabledNetworks,
+    changeNetwork,
+  } = useWallet();
   const nativeMint = nativeAssetId(networkInfo?.family);
+  const tokenChain = networkFamilyToChain(networkInfo?.family);
   const [selectedMint, setSelectedMint] = useState(nativeMint);
   const [pickerOpen, setPickerOpen] = useState(false);
+  const switchable = networks.filter(
+    (n) => n.enabled && enabledNetworks.includes(n.id) && !n.is_testnet,
+  );
 
   useEffect(() => {
     setSelectedMint(nativeMint);
@@ -51,19 +65,21 @@ export function SendPage() {
         mint: nativeMint,
         symbol: nativeSymbol,
         name: networkInfo?.name ?? nativeSymbol,
-        logo_uri: nativeSymbol === "SOL" ? localLogoForMint(WRAPPED_SOL) : null,
+        logo_uri: localLogoForAsset(tokenChain, nativeMint, nativeSymbol),
         balanceUi: nativeBalance ?? 0,
+        chain: tokenChain,
       },
     ];
     if (showTokens) {
       for (const token of tokens) {
-        const branded = withLocalLogo(token);
+        const branded = withLocalLogo(token, tokenChain);
         options.push({
           mint: branded.mint,
           symbol: branded.symbol,
           name: branded.name,
           logo_uri: branded.logo_uri,
           balanceUi: branded.ui_amount,
+          chain: tokenChain,
         });
       }
     }
@@ -142,6 +158,21 @@ export function SendPage() {
           <CardDescription>Review carefully before confirming.</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {switchable.length > 1 && (
+            <div className="flex flex-wrap gap-1">
+              {switchable.map((n) => (
+                <Button
+                  key={n.id}
+                  type="button"
+                  size="sm"
+                  variant={n.id === network ? "default" : "outline"}
+                  onClick={() => void changeNetwork(n.id)}
+                >
+                  {n.name}
+                </Button>
+              ))}
+            </div>
+          )}
           {showTokens ? (
             <TokenDropdown
               label="Token"
@@ -157,6 +188,7 @@ export function SendPage() {
                 setError(null);
                 setSuccess(null);
               }}
+              chain={tokenChain}
             />
           ) : (
             <div className="space-y-2">

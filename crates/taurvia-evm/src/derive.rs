@@ -27,8 +27,30 @@ pub fn derive_from_seed(seed: &[u8]) -> Result<EvmSigner> {
     let secret_key = xprv.private_key();
     let mut secret = Zeroizing::new([0u8; 32]);
     secret.copy_from_slice(secret_key.to_bytes().as_slice());
+    from_secret(*secret)
+}
+
+pub fn from_hex(input: &str) -> Result<EvmSigner> {
+    let trimmed = input.trim();
+    let hex = trimmed
+        .strip_prefix("0x")
+        .or_else(|| trimmed.strip_prefix("0X"))
+        .unwrap_or(trimmed);
+    if hex.len() != 64 || !hex.chars().all(|c| c.is_ascii_hexdigit()) {
+        bail!("invalid Ethereum private key (expected 0x + 64 hex characters)");
+    }
+    let bytes = hex::decode(hex).map_err(|e| anyhow!("invalid Ethereum private key: {e}"))?;
+    let mut secret = [0u8; 32];
+    secret.copy_from_slice(&bytes);
+    from_secret(secret)
+}
+
+fn from_secret(secret: [u8; 32]) -> Result<EvmSigner> {
     let address = address_from_secret(&secret)?;
-    Ok(EvmSigner { address, secret })
+    Ok(EvmSigner {
+        address,
+        secret: Zeroizing::new(secret),
+    })
 }
 
 pub fn validate_address(address: &str) -> Result<()> {

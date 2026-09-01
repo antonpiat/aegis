@@ -8,7 +8,7 @@ mod transfer;
 
 pub use jupiter::{configure_jupiter_api_key, WRAPPED_SOL_MINT};
 pub use keypair::{
-    derive_keypair_from_seed, keypair_from_base64, keypair_to_base64,
+    derive_keypair_from_seed, keypair_from_base64, keypair_from_secret_input, keypair_to_base64,
 };
 pub use price::get_prices;
 pub use rpc::SolanaRpc;

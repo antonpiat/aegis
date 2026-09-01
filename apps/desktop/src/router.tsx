@@ -9,9 +9,10 @@ import { SendPage } from "@/pages/SendPage";
 import { SettingsPage } from "@/pages/SettingsPage";
 import { SwapPage } from "@/pages/SwapPage";
 import { UnlockPage } from "@/pages/UnlockPage";
-import { ConfirmSeedPage } from "@/pages/onboarding/ConfirmSeedPage";
 import { CreateImportPage } from "@/pages/onboarding/CreateImportPage";
 import { ImportBackupPage } from "@/pages/onboarding/ImportBackupPage";
+import { ImportKeyPage } from "@/pages/onboarding/ImportKeyPage";
+import { RestoreChoicePage } from "@/pages/onboarding/RestoreChoicePage";
 import { SetPasswordPage } from "@/pages/onboarding/SetPasswordPage";
 import { ShowSeedPage } from "@/pages/onboarding/ShowSeedPage";
 import { WalletReadyPage } from "@/pages/onboarding/WalletReadyPage";
@@ -34,10 +35,11 @@ export function AppRouter() {
         <>
           <Route path="/onboarding" element={<WelcomePage />} />
           <Route path="/onboarding/create" element={<CreateImportPage mode="create" />} />
+          <Route path="/onboarding/restore" element={<RestoreChoicePage />} />
           <Route path="/onboarding/import" element={<CreateImportPage mode="import" />} />
+          <Route path="/onboarding/import-key" element={<ImportKeyPage />} />
           <Route path="/onboarding/import-backup" element={<ImportBackupPage />} />
           <Route path="/onboarding/seed" element={<ShowSeedPage />} />
-          <Route path="/onboarding/confirm" element={<ConfirmSeedPage />} />
           <Route path="/onboarding/password" element={<SetPasswordPage />} />
           <Route path="/onboarding/ready" element={<WalletReadyPage />} />
           <Route path="*" element={<Navigate to="/onboarding" replace />} />

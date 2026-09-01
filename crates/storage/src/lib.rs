@@ -158,6 +158,9 @@ mod tests {
             created_at: "2026-01-01T00:00:00Z".into(),
             protection: WalletProtection::Password,
             addresses: Default::default(),
+            account_name: "Account 1".into(),
+            import_kind: Default::default(),
+            enabled_networks: models::default_enabled_network_ids(),
             crypto: CryptoEnvelope {
                 kdf: "argon2id".into(),
                 salt: "c2FsdA==".into(),

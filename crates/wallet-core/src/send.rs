@@ -26,7 +26,7 @@ impl WalletService {
             ChainFamily::Evm => {
                 let url = self.evm_rpc_url.lock().unwrap().clone();
                 let rpc = taurvia_evm::EvmRpc::new(&url, *desc);
-                let from = self.with_session(|k| k.evm.address.clone())?;
+                let from = self.with_session(|k| k.require_evm().map(|e| e.address.clone()))??;
                 rpc.preview_send(&from, to, amount, asset)
                     .await
                     .map_err(WalletError::Operation)
@@ -34,7 +34,7 @@ impl WalletService {
             ChainFamily::Bitcoin => {
                 let url = self.btc_esplora.lock().unwrap().clone();
                 let rpc = taurvia_bitcoin::BtcRpc::new(&url, *desc);
-                let from = self.with_session(|k| k.btc(desc.is_testnet).address.clone())?;
+                let from = self.with_session(|k| k.btc(desc.is_testnet).map(|s| s.address.clone()))??;
                 rpc.preview_send(&from, to, amount)
                     .await
                     .map_err(WalletError::Operation)
@@ -69,7 +69,7 @@ impl WalletService {
             ChainFamily::Evm => {
                 let url = self.evm_rpc_url.lock().unwrap().clone();
                 let rpc = taurvia_evm::EvmRpc::new(&url, *desc);
-                let signer = self.with_session(|k| k.evm.clone())?;
+                let signer = self.with_session(|k| k.require_evm().cloned())??;
                 rpc.send(&signer, to, amount, asset)
                     .await
                     .map_err(WalletError::Operation)
@@ -77,7 +77,7 @@ impl WalletService {
             ChainFamily::Bitcoin => {
                 let url = self.btc_esplora.lock().unwrap().clone();
                 let rpc = taurvia_bitcoin::BtcRpc::new(&url, *desc);
-                let signer = self.with_session(|k| k.btc(desc.is_testnet).clone())?;
+                let signer = self.with_session(|k| k.btc(desc.is_testnet).cloned())??;
                 rpc.send(&signer, to, amount)
                     .await
                     .map_err(WalletError::Operation)

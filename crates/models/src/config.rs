@@ -73,6 +73,10 @@ fn default_network() -> String {
     DEFAULT_NETWORK_ID.to_string()
 }
 
+fn default_enabled_networks() -> Vec<String> {
+    crate::default_enabled_network_ids()
+}
+
 fn default_rpc_urls() -> HashMap<String, String> {
     HashMap::new()
 }
@@ -90,6 +94,12 @@ pub struct AppSettings {
     /// Active network id. Synced with `WalletFile.network` on switch.
     #[serde(default = "default_network")]
     pub network: String,
+    /// Activated mainnets (Phantom-style). Testnets stay Advanced via `network`.
+    #[serde(default = "default_enabled_networks")]
+    pub enabled_networks: Vec<String>,
+    /// Optional 0x API key for Ethereum swaps.
+    #[serde(default)]
+    pub zerox_api_key: Option<String>,
     /// Minutes of idle time before auto-lock. Defaults to 5. `0` disables.
     #[serde(
         default = "default_auto_lock_minutes",
@@ -124,6 +134,8 @@ impl Default for AppSettings {
             rpc_urls: HashMap::new(),
             jupiter_api_key: None,
             network: default_network(),
+            enabled_networks: default_enabled_networks(),
+            zerox_api_key: None,
             auto_lock_minutes: default_auto_lock_minutes(),
             hide_balances: default_hide_balances(),
             explorer: ExplorerKind::Solscan,
@@ -187,6 +199,14 @@ impl RuntimeConfig {
 
 #[derive(Debug, Clone, Serialize, Deserialize, Type)]
 pub struct OnboardingDraft {
+    #[serde(default)]
     pub mnemonic: String,
     pub mode: String,
+    /// Raw private key when `mode` is `import-key`.
+    #[serde(default)]
+    pub secret: String,
+    #[serde(default)]
+    pub import_kind: String,
+    #[serde(default)]
+    pub account_name: String,
 }

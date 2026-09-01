@@ -158,7 +158,7 @@ export function ImportBackupPage() {
           </label>
           {error && <Alert className="border-destructive/40 text-destructive">{error}</Alert>}
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => navigate("/onboarding")}>
+            <Button variant="outline" onClick={() => navigate("/onboarding/restore")}>
               Back
             </Button>
             <Button

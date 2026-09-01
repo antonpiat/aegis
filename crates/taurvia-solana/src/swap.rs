@@ -92,9 +92,10 @@ impl SolanaRpc {
             in_amount_ui: in_amount as f64 / 10f64.powi(input_meta.decimals as i32),
             out_amount_ui: out_amount as f64 / 10f64.powi(output_meta.decimals as i32),
             price_impact_pct,
-            network_fee_lamports,
-            network_fee_sol: lamports_to_sol(network_fee_lamports),
+            network_fee: lamports_to_sol(network_fee_lamports),
+            fee_symbol: "SOL".into(),
             slippage_bps,
+            route: "jupiter".into(),
         })
     }
 

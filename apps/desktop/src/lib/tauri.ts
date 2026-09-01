@@ -1,16 +1,20 @@
 import { commands } from "@/bindings";
-import type { AppSettings, Result } from "@/bindings";
+import type { AppSettings, OnboardingDraft, Result } from "@/bindings";
 export type {
   ActivityItem,
   ApiError,
   AppSettings,
+  ChainSnapshot,
   ExplorerKind,
+  ImportKind,
   NetworkInfo,
+  OnboardingDraft,
   RuntimeConfig,
   SendPreview,
   SwapQuote,
   TokenBalance,
   TokenInfo,
+  WalletSnapshot,
 } from "@/bindings";
 
 async function unwrap<T>(promise: Promise<Result<T, unknown>> | Promise<T>): Promise<T> {
@@ -35,10 +39,12 @@ export const walletApi = {
   getWalletSnapshot: () => unwrap(commands.getWalletSnapshot()),
   generateMnemonic: () => unwrap(commands.generateMnemonic()),
   validateMnemonic: (mnemonic: string) => unwrap(commands.validateMnemonic(mnemonic)),
-  createWallet: (mnemonic: string, password: string) =>
-    unwrap(commands.createWallet(mnemonic, password)),
-  importWallet: (mnemonic: string, password: string) =>
-    unwrap(commands.importWallet(mnemonic, password)),
+  createWallet: (mnemonic: string, password: string, accountName: string) =>
+    unwrap(commands.createWallet(mnemonic, password, accountName)),
+  importWallet: (mnemonic: string, password: string, accountName: string) =>
+    unwrap(commands.importWallet(mnemonic, password, accountName)),
+  importPrivateKey: (secret: string, password: string, accountName: string) =>
+    unwrap(commands.importPrivateKey(secret, password, accountName)),
   importWalletBackup: (walletJson: string, password: string) =>
     unwrap(commands.importWalletBackup(walletJson, password)),
   unlockWallet: (password: string) => unwrap(commands.unlockWallet(password)),
@@ -56,6 +62,9 @@ export const walletApi = {
     unwrap(commands.exportWalletToPath(password, path)),
   changeWalletNetwork: (network: string) =>
     unwrap(commands.changeWalletNetwork(network)),
+  setEnabledNetworks: (networks: string[]) =>
+    unwrap(commands.setEnabledNetworks(networks)),
+  setAccountName: (name: string) => unwrap(commands.setAccountName(name)),
   listNetworks: () => commands.listNetworks(),
   getActivity: (limit: number) => unwrap(commands.getActivity(limit)),
   previewSend: (to: string, amount: number, asset: string | null) =>
@@ -82,8 +91,8 @@ export const walletApi = {
     unwrap(commands.updateAppSettings(settings)),
   getManagedDefaultRpcUrl: (network?: string | null) =>
     commands.getManagedDefaultRpcUrl(network ?? null),
-  setOnboardingDraft: (mnemonic: string, mode: string) =>
-    unwrap(commands.setOnboardingDraft(mnemonic, mode)),
+  setOnboardingDraft: (draft: OnboardingDraft) =>
+    unwrap(commands.setOnboardingDraft(draft)),
   getOnboardingDraft: () => unwrap(commands.getOnboardingDraft()),
   clearOnboardingDraft: () => unwrap(commands.clearOnboardingDraft()),
 };

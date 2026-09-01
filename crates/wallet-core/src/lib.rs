@@ -51,7 +51,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let service = test_service(dir.path());
         let mnemonic = service.generate_mnemonic().unwrap();
-        service.create_wallet(&mnemonic, "Password123!").unwrap();
+        service.create_wallet(&mnemonic, "Password123!", "Account 1").unwrap();
         assert!(service.wallet_exists());
         let pubkey = service.unlock("Password123!").unwrap();
         assert!(!pubkey.is_empty());
@@ -78,7 +78,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let service = test_service(dir.path());
         let mnemonic = service.generate_mnemonic().unwrap();
-        let err = service.create_wallet(&mnemonic, "password123").unwrap_err();
+        let err = service.create_wallet(&mnemonic, "password123", "Account 1").unwrap_err();
         assert!(err.to_string().contains("uppercase"));
     }
 
@@ -87,7 +87,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let service = test_service(dir.path());
         let mnemonic = service.generate_mnemonic().unwrap();
-        service.create_wallet(&mnemonic, "Password123!").unwrap();
+        service.create_wallet(&mnemonic, "Password123!", "Account 1").unwrap();
         service
             .change_network("solana-devnet")
             .unwrap();
@@ -105,10 +105,10 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let service = test_service(dir.path());
         let mnemonic = service.generate_mnemonic().unwrap();
-        service.create_wallet(&mnemonic, "Password123!").unwrap();
+        service.create_wallet(&mnemonic, "Password123!", "Account 1").unwrap();
         service.unlock("Password123!").unwrap();
         service
-            .change_network("solana-devnet")
+            .set_enabled_networks(&["ethereum-mainnet".into()])
             .unwrap();
 
         let preview_err = service
@@ -120,16 +120,89 @@ mod tests {
             )
             .await
             .unwrap_err();
-        assert!(preview_err.to_string().contains("Mainnet"));
+        assert!(
+            preview_err.to_string().to_lowercase().contains("solana")
+                || preview_err.to_string().to_lowercase().contains("activate"),
+            "{preview_err}"
+        );
+    }
 
-        let search_err = service.search_tokens("ray").await.unwrap_err();
-        assert!(search_err.to_string().contains("Mainnet"));
+    #[tokio::test]
+    async fn seed_wallet_snapshot_lists_enabled_networks() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = test_service(dir.path());
+        let mnemonic = service.generate_mnemonic().unwrap();
+        service
+            .create_wallet(&mnemonic, "Password123!", "Account 1")
+            .unwrap();
+        service.unlock("Password123!").unwrap();
+        let enabled = service.enabled_network_ids();
+        assert!(enabled.contains(&"solana-mainnet".to_string()));
+        assert!(enabled.contains(&"ethereum-mainnet".to_string()));
+        assert!(enabled.contains(&"bitcoin-mainnet".to_string()));
+        let snap = service.get_snapshot().await.unwrap();
+        assert_eq!(snap.account_name, "Account 1");
+        assert!(snap.can_reveal_mnemonic);
+        assert_eq!(snap.import_kind, models::ImportKind::Mnemonic);
+        assert_eq!(snap.enabled_networks, enabled);
+    }
 
-        let resolve_err = service
-            .resolve_token("So11111111111111111111111111111111111111112")
-            .await
+    #[tokio::test]
+    async fn import_solana_key_hides_other_families() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = test_service(dir.path());
+        let mnemonic = service.generate_mnemonic().unwrap();
+        let seed = taurvia_hd::seed_from_mnemonic(&mnemonic).unwrap();
+        let kp = taurvia_solana::derive_keypair_from_seed(seed.as_slice()).unwrap();
+        let secret = taurvia_solana::keypair_to_base64(&kp);
+        service
+            .import_private_key(&secret, "Password123!", "Trading")
+            .unwrap();
+        service.unlock("Password123!").unwrap();
+        assert_eq!(service.account_name(), "Trading");
+        assert!(!service.import_kind().has_mnemonic());
+        assert!(service.reveal_mnemonic("Password123!").is_err());
+        let err = service.change_network("ethereum-mainnet").unwrap_err();
+        assert!(err.to_string().to_lowercase().contains("ethereum") || err.to_string().contains("key"));
+        let enable_err = service
+            .set_enabled_networks(&["ethereum-mainnet".into(), "solana-mainnet".into()])
             .unwrap_err();
-        assert!(resolve_err.to_string().contains("Mainnet"));
+        assert!(enable_err.to_string().to_lowercase().contains("solana") || enable_err.to_string().contains("Ethereum") || enable_err.to_string().contains("only"));
+    }
+
+    #[tokio::test]
+    async fn import_evm_hex_key_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = test_service(dir.path());
+        // secp256k1 one (not on curve check — k256 accepts this well-known test vector's complement; use a valid key)
+        let secret = "0x4c0883a69102937d6231471b5dbb6204fe5129617082792ae468d01a3f362318";
+        service
+            .import_private_key(secret, "Password123!", "ETH key")
+            .unwrap();
+        let addr = service.unlock("Password123!").unwrap();
+        assert!(addr.starts_with("0x"));
+        assert_eq!(service.import_kind(), models::ImportKind::EvmKey);
+        assert_eq!(service.enabled_network_ids(), vec!["ethereum-mainnet".to_string()]);
+        assert!(service.change_network("solana-mainnet").is_err());
+    }
+
+    #[tokio::test]
+    async fn import_bitcoin_wif_key_round_trip() {
+        let dir = tempfile::tempdir().unwrap();
+        let service = test_service(dir.path());
+        let secret = "KwDiBf89QgGbjEhKnhXJuH7LrciVrZi3qYjgd9M7rFU73sVHnoWn";
+        service
+            .import_private_key(secret, "Password123!", "BTC key")
+            .unwrap();
+        let addr = service.unlock("Password123!").unwrap();
+        assert!(addr.starts_with("bc1"));
+        assert_eq!(service.import_kind(), models::ImportKind::BitcoinKey);
+        assert_eq!(
+            service.enabled_network_ids(),
+            vec!["bitcoin-mainnet".to_string()]
+        );
+        assert!(service.change_network("ethereum-mainnet").is_err());
+        assert!(service.reveal_mnemonic("Password123!").is_err());
     }
 
     #[tokio::test]
@@ -137,7 +210,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let service = test_service(dir.path());
         let mnemonic = service.generate_mnemonic().unwrap();
-        service.create_wallet(&mnemonic, "Password123!").unwrap();
+        service.create_wallet(&mnemonic, "Password123!", "Account 1").unwrap();
         service.unlock("Password123!").unwrap();
         service.enable_device_protection("Password123!").unwrap();
         assert!(service.device_protection_enabled());
@@ -150,7 +223,7 @@ mod tests {
             .unwrap_err();
         assert!(matches!(err, WalletError::DeviceSecretMissing));
 
-        other.import_wallet(&mnemonic, "Password123!").unwrap();
+        other.import_wallet(&mnemonic, "Password123!", "Account 1").unwrap();
         other.unlock("Password123!").unwrap();
         assert_eq!(other.reveal_mnemonic("Password123!").unwrap(), mnemonic);
     }
@@ -160,7 +233,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let service = test_service(dir.path());
         let mnemonic = service.generate_mnemonic().unwrap();
-        service.create_wallet(&mnemonic, "Password123!").unwrap();
+        service.create_wallet(&mnemonic, "Password123!", "Account 1").unwrap();
         let exported = service.export_wallet("Password123!").unwrap();
 
         let dir2 = tempfile::tempdir().unwrap();
@@ -177,7 +250,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let service = test_service(dir.path());
         let mnemonic = service.generate_mnemonic().unwrap();
-        service.create_wallet(&mnemonic, "Password123!").unwrap();
+        service.create_wallet(&mnemonic, "Password123!", "Account 1").unwrap();
         service.unlock("Password123!").unwrap();
         service.enable_device_protection("Password123!").unwrap();
         service.disable_device_protection("Password123!").unwrap();
@@ -197,13 +270,13 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let service = test_service(dir.path());
         let mnemonic = service.generate_mnemonic().unwrap();
-        service.create_wallet(&mnemonic, "Password123!").unwrap();
+        service.create_wallet(&mnemonic, "Password123!", "Account 1").unwrap();
         assert!(service.wallet_exists());
         service.reset_local_wallet().unwrap();
         assert!(!service.wallet_exists());
         assert!(!service.is_unlocked());
         // Can recreate after wipe.
-        service.create_wallet(&mnemonic, "Password123!").unwrap();
+        service.create_wallet(&mnemonic, "Password123!", "Account 1").unwrap();
         assert!(service.wallet_exists());
     }
 }

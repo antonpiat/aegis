@@ -41,6 +41,7 @@ import {
   isSettingsSectionId,
   type SettingsSectionId,
 } from "@/lib/settingsNav";
+import { TokenIcon } from "@/components/TokenIcon";
 import { withLocalLogo } from "@/lib/tokenCatalog";
 import { ApiError, AppSettings, ExplorerKind, walletApi } from "@/lib/tauri";
 import { shortenAddress } from "@/lib/utils";
@@ -112,7 +113,7 @@ export function SettingsPage() {
   const navigate = useNavigate();
   const location = useLocation();
   const { section: sectionParam } = useParams<{ section: string }>();
-  const { refresh, refreshBalances, settings, saveSettings, network, changeNetwork, networks, networkInfo } =
+  const { refresh, refreshBalances, settings, saveSettings, network, changeNetwork, networks, networkInfo, canRevealMnemonic, enabledNetworks: activatedNetworks, setEnabledNetworks, importKind } =
     useWallet();
   const layout = useLayoutMode();
   const [seedOpen, setSeedOpen] = useState(false);
@@ -595,19 +596,12 @@ export function SettingsPage() {
                           className="flex items-center justify-between gap-3 rounded-md border border-border px-3 py-2"
                         >
                           <div className="flex min-w-0 items-center gap-3">
-                            {row.logo_uri ? (
-                              <img
-                                src={row.logo_uri}
-                                alt=""
-                                className="h-8 w-8 shrink-0 rounded-full border border-border object-cover"
-                                loading="lazy"
-                                decoding="async"
-                              />
-                            ) : (
-                              <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-full border border-border bg-secondary text-xs font-semibold">
-                                {row.symbol.slice(0, 2).toUpperCase()}
-                              </div>
-                            )}
+                            <TokenIcon
+                              symbol={row.symbol}
+                              mint={row.mint}
+                              logoUri={row.logo_uri}
+                              size={32}
+                            />
                             <div className="min-w-0">
                               <p className="truncate font-medium">{row.symbol}</p>
                               <p className="truncate font-mono text-xs text-muted-foreground">
@@ -708,6 +702,7 @@ export function SettingsPage() {
                 another device only with a password-only export (disable device protection first
                 if needed).
               </p>
+              {canRevealMnemonic && (
               <Button
                 variant="destructive"
                 className="w-full justify-start"
@@ -715,6 +710,7 @@ export function SettingsPage() {
               >
                 Reveal recovery phrase
               </Button>
+              )}
             </CardContent>
           </Card>
         )}
@@ -768,6 +764,34 @@ export function SettingsPage() {
         {section === "network" && (
           <Card>
             <CardContent className="space-y-4 pt-6">
+              <p className="text-sm font-medium">Activated chains</p>
+              <p className="text-xs text-muted-foreground">
+                {importKind === "mnemonic"
+                  ? "Turn chains on or off. Last-used chain is for Send and Receive."
+                  : "This wallet was imported from a single key."}
+              </p>
+              {["solana-mainnet", "ethereum-mainnet", "bitcoin-mainnet"].map((id) => {
+                const info = networks.find((n) => n.id === id);
+                if (!info) return null;
+                const on = activatedNetworks.includes(id);
+                return (
+                  <label key={id} className="flex cursor-pointer items-center gap-2.5 text-sm">
+                    <Checkbox
+                      checked={on}
+                      onCheckedChange={(checked) => {
+                        const next = checked
+                          ? [...activatedNetworks.filter((x) => x !== id), id]
+                          : activatedNetworks.filter((x) => x !== id);
+                        void setEnabledNetworks(next).catch((err) => {
+                          const apiError = err as ApiError;
+                          setNetworkError(apiError.message ?? "Could not update chains");
+                        });
+                      }}
+                    />
+                    <span>{info.name}</span>
+                  </label>
+                );
+              })}
               <SelectDropdown
                 label="Network"
                 value={normalizeNetworkId(network)}
@@ -791,8 +815,7 @@ export function SettingsPage() {
                 <span className="max-w-[60%] truncate font-mono text-xs">{activeRpc || "—"}</span>
               </div>
               <p className="text-xs text-muted-foreground">
-                Same seed on every network. Switching changes RPC only — no password. Address
-                format is different per family (Solana / Ethereum / Bitcoin).
+                Last-used chain for Send and Receive. Testnets stay here under Advanced.
               </p>
               {networkError && (
                 <Alert className="border-destructive/40 text-destructive">{networkError}</Alert>
@@ -830,6 +853,21 @@ export function SettingsPage() {
                     value={jupiterKey}
                     onChange={(e) => setJupiterKey(e.target.value)}
                     placeholder="Leave empty for keyless Jupiter"
+                    autoComplete="off"
+                  />
+                </div>
+              )}
+              {(networkInfo?.family === "evm" || activatedNetworks.includes("ethereum-mainnet")) && (
+                <div className="space-y-2">
+                  <Label htmlFor="zerox-key">0x API key (Ethereum swap)</Label>
+                  <Input
+                    id="zerox-key"
+                    type="password"
+                    value={settings.zerox_api_key ?? ""}
+                    onChange={(e) => {
+                      void patchSettings({ zerox_api_key: e.target.value || null });
+                    }}
+                    placeholder="Required for Ethereum quotes"
                     autoComplete="off"
                   />
                 </div>

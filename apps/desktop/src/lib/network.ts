@@ -31,6 +31,13 @@ export function canSwap(info: NetworkInfo | undefined): boolean {
   return Boolean(info?.features.swap && !info.is_testnet);
 }
 
+export function canSwapAny(enabledIds: string[], networks: NetworkInfo[]): boolean {
+  return enabledIds.some((id) => {
+    const info = networks.find((n) => n.id === id);
+    return canSwap(info);
+  });
+}
+
 export function networkShortLabel(info: NetworkInfo | undefined, id?: unknown): string {
   if (info) {
     return info.is_testnet ? `${info.name}` : info.name;
@@ -41,18 +48,7 @@ export function networkShortLabel(info: NetworkInfo | undefined, id?: unknown): 
 /** Shell subtitle under the brand mark. */
 export function productChainLabel(info: NetworkInfo | undefined): string {
   if (!info) return "Wallet";
-  switch (info.family) {
-    case "solana":
-      return "Solana Wallet";
-    case "evm":
-      return "Ethereum Wallet";
-    case "bitcoin":
-      return "Bitcoin Wallet";
-    case "sui":
-      return "Sui Wallet";
-    default:
-      return "Wallet";
-  }
+  return info.name;
 }
 
 export function nativeAssetId(family: ChainFamily | undefined): string {

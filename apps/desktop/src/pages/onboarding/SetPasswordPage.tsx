@@ -11,15 +11,19 @@ import { useWallet } from "@/context/WalletContext";
 import { isPasswordStrong, passwordStrengthError } from "@/lib/password";
 import { ApiError, walletApi } from "@/lib/tauri";
 
+type Mode = "create" | "import" | "import-key";
+
 export function SetPasswordPage() {
   const navigate = useNavigate();
   const { unlock, refresh } = useWallet();
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
+  const [accountName, setAccountName] = useState("Account 1");
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [mnemonic, setMnemonic] = useState("");
-  const [mode, setMode] = useState<"create" | "import">("create");
+  const [secret, setSecret] = useState("");
+  const [mode, setMode] = useState<Mode>("create");
   const [ready, setReady] = useState(false);
   const [enableDeviceProtection, setEnableDeviceProtection] = useState(false);
 
@@ -29,12 +33,25 @@ export function SetPasswordPage() {
       try {
         const draft = await walletApi.getOnboardingDraft();
         if (cancelled) return;
-        if (!draft?.mnemonic) {
+        const nextMode = draft?.mode === "import-key"
+          ? "import-key"
+          : draft?.mode === "import"
+            ? "import"
+            : "create";
+        if (nextMode === "import-key") {
+          if (!draft?.secret) {
+            navigate("/onboarding", { replace: true });
+            return;
+          }
+          setSecret(draft.secret);
+        } else if (!draft?.mnemonic) {
           navigate("/onboarding", { replace: true });
           return;
+        } else {
+          setMnemonic(draft.mnemonic);
         }
-        setMnemonic(draft.mnemonic);
-        setMode(draft.mode === "import" ? "import" : "create");
+        setMode(nextMode);
+        if (draft?.account_name) setAccountName(draft.account_name);
         setReady(true);
       } catch {
         if (!cancelled) navigate("/onboarding", { replace: true });
@@ -62,15 +79,17 @@ export function SetPasswordPage() {
 
     setLoading(true);
     setError(null);
+    const name = accountName.trim() || "Account 1";
     try {
-      if (mode === "import") {
-        await walletApi.importWallet(mnemonic, password);
+      if (mode === "import-key") {
+        await walletApi.importPrivateKey(secret, password, name);
+      } else if (mode === "import") {
+        await walletApi.importWallet(mnemonic, password, name);
       } else {
-        await walletApi.createWallet(mnemonic, password);
+        await walletApi.createWallet(mnemonic, password, name);
       }
       await walletApi.clearOnboardingDraft();
 
-      // Bind before unlock so a protection failure stays visible (unlock remounts into the app).
       if (enableDeviceProtection) {
         try {
           await walletApi.enableDeviceProtection(password);
@@ -94,7 +113,6 @@ export function SetPasswordPage() {
     } catch (err) {
       const apiError = err as ApiError;
       setError(apiError.message ?? "Failed to create wallet");
-      // File may already exist after a mid-flow failure — sync so the user can unlock.
       try {
         const snap = await walletApi.getWalletSnapshot();
         if (snap.exists) await refresh();
@@ -110,6 +128,9 @@ export function SetPasswordPage() {
     return null;
   }
 
+  const submitLabel =
+    mode === "import-key" ? "Import key" : mode === "import" ? "Import wallet" : "Create wallet";
+
   return (
     <div className="flex min-h-screen items-center justify-center bg-background p-6">
       <Card className="w-full max-w-md">
@@ -119,6 +140,16 @@ export function SetPasswordPage() {
         </CardHeader>
         <CardContent>
           <form className="space-y-4" onSubmit={handleSubmit}>
+            <div className="space-y-2">
+              <Label htmlFor="account-name">Account name</Label>
+              <Input
+                id="account-name"
+                value={accountName}
+                onChange={(e) => setAccountName(e.target.value)}
+                placeholder="Account 1"
+                autoComplete="off"
+              />
+            </div>
             <div className="space-y-2">
               <Label htmlFor="password">Password</Label>
               <Input
@@ -160,15 +191,13 @@ export function SetPasswordPage() {
               <span>
                 Enable Enhanced device protection
                 <span className="mt-1 block text-xs text-muted-foreground">
-                  Binds decryption to this device’s credential store. OS reinstall, keychain reset,
-                  or replacing the device can make the local wallet file unrecoverable without your
-                  recovery phrase. Confirm you have (or will back up) that phrase before enabling.
+                  Binds decryption to this device. Confirm you have a backup first.
                 </span>
               </span>
             </label>
             {error && <Alert className="border-destructive/40 text-destructive">{error}</Alert>}
             <Button className="w-full" type="submit" disabled={!canSubmit}>
-              {loading ? "Securing wallet..." : mode === "import" ? "Import wallet" : "Create wallet"}
+              {loading ? "Securing wallet..." : submitLabel}
             </Button>
           </form>
         </CardContent>

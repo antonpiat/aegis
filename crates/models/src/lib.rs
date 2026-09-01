@@ -15,17 +15,17 @@ pub use config::{
 };
 pub use error::ApiError;
 pub use network::{
-    env_rpc_override, get_network, list_network_info, managed_rpc_url,
-    normalize_network_id, require_network, ChainFamily, ChainFeatures, NetworkDescriptor, NetworkInfo,
-    DEFAULT_NETWORK_ID, NETWORKS, NETWORK_BITCOIN_MAINNET, NETWORK_BITCOIN_TESTNET,
-    NETWORK_ETHEREUM_MAINNET, NETWORK_ETHEREUM_SEPOLIA, NETWORK_SOLANA_DEVNET,
-    NETWORK_SOLANA_MAINNET,
+    default_enabled_network_ids, env_rpc_override, get_network,
+    list_network_info, mainnet_id_for_family, managed_rpc_url, normalize_network_id, require_network,
+    ChainFamily, ChainFeatures, NetworkDescriptor, NetworkInfo, DEFAULT_NETWORK_ID, NETWORKS,
+    NETWORK_BITCOIN_MAINNET, NETWORK_BITCOIN_TESTNET, NETWORK_ETHEREUM_MAINNET,
+    NETWORK_ETHEREUM_SEPOLIA, NETWORK_SOLANA_DEVNET, NETWORK_SOLANA_MAINNET,
 };
 pub use send::{SendPreview, SendResult};
-pub use snapshot::WalletSnapshot;
+pub use snapshot::{ChainSnapshot, WalletSnapshot};
 pub use swap::{SwapQuote, SwapResult};
 pub use token::{TokenBalance, TokenInfo};
 pub use wallet::{
-    CryptoEnvelope, EncryptedPayload, WalletAddresses, WalletFile, WalletProtection,
-    DEFAULT_DERIVATION_PATH, MIN_WALLET_FILE_VERSION, WALLET_FILE_VERSION,
+    CryptoEnvelope, EncryptedPayload, ImportKind, WalletAddresses, WalletFile, WalletProtection,
+    DEFAULT_ACCOUNT_NAME, DEFAULT_DERIVATION_PATH, MIN_WALLET_FILE_VERSION, WALLET_FILE_VERSION,
 };
