@@ -9,6 +9,29 @@ and this project follows [Semantic Versioning](https://semver.org/spec/v2.0.0.ht
 
 ---
 
+## [0.5.1] - 2026-09-01
+
+### Added
+
+- Phantom-style onboarding: create seed then name + password (no 3-word quiz); restore via recovery phrase, private key, or JSON backup; hardware wallet listed as coming soon
+- Wallet file v3: `account_name`, `import_kind`, `enabled_networks`; `import_private_key` for Solana (base58/JSON), Ethereum (`0x` hex), and Bitcoin WIF
+- Multi-chain portfolio: activate Solana, Ethereum, and Bitcoin together; dashboard total USD plus per-chain sections
+- Swap on Ethereum (0x) and Bitcoin (Thorchain inbound + PSBT); Solana remains Jupiter
+- Shared `TokenIcon` with bundled SOL/ETH/BTC majors, chain badges, and initials fallback
+
+### Changed
+
+- Last-used network is for Send/Receive, not an exclusive mode
+- Sidebar shows account name; key-only wallets cannot reveal a seed or activate other families
+- Swap is available when the from-asset chain is an enabled mainnet, not Solana-only
+
+### Security
+
+- Key-only sessions hold that family only; a raw key cannot derive the other curves
+- Quotes and swap signatures stay in Rust; the UI never sees private keys
+
+---
+
 ## [0.5.0] - 2026-08-31
 
 ### Added
@@ -308,7 +331,8 @@ When cutting a new version:
 6. Tag and push: `git tag vX.Y.Z && git push origin vX.Y.Z` (tag must match `tauri.conf.json`).
 7. [Release](../.github/workflows/release.yml) builds unsigned installers and attaches them to the GitHub Release. Edit the notes if needed.
 
-[Unreleased]: https://github.com/antonpiat/taurvia/compare/v0.5.0...HEAD
+[Unreleased]: https://github.com/antonpiat/taurvia/compare/v0.5.1...HEAD
+[0.5.1]: https://github.com/antonpiat/taurvia/compare/v0.5.0...v0.5.1
 [0.5.0]: https://github.com/antonpiat/taurvia/compare/v0.4.3...v0.5.0
 [0.4.3]: https://github.com/antonpiat/taurvia/compare/v0.4.2...v0.4.3
 [0.4.2]: https://github.com/antonpiat/taurvia/compare/v0.4.1...v0.4.2
