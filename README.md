@@ -9,7 +9,8 @@
 </p>
 
 <p align="center">
-  A non-custodial desktop wallet — keys stay on your machine, every signature is produced in Rust. Solana, Ethereum, and Bitcoin from one seed. Swap stays on Solana.
+  A non-custodial desktop wallet — keys stay on your machine, every signature is produced in Rust.
+  Solana, Ethereum, and Bitcoin from one seed (or a single private key). Swap on each enabled mainnet.
 </p>
 
 <p align="center">
@@ -27,19 +28,18 @@
 
 Most wallets ask you to trust a browser tab or a hosted service. Taurvia is a **native desktop app**: your seed phrase and private keys never leave your device, and every signature is produced inside a Rust core the UI cannot bypass.
 
-Built with **Tauri v2**. Solana is the first-class / swap chain. Ethereum and Bitcoin use the same lock, password, and IPC rules — not a dApp browser, not WalletConnect, and no JavaScript key material.
+Built with **Tauri v2**. One BIP39 phrase derives Solana, Ethereum, and Bitcoin. Importing a raw private key unlocks that family only. Not a dApp browser, not WalletConnect, and no JavaScript key material.
 
 ## Features
 
 | | |
 |---|---|
-| **Create & import** | New wallet, import from backup JSON, or recover from a 12/24-word seed |
-| **Balances** | Native + token holdings (where the network supports tokens) with USD prices |
-| **Swap** | Jupiter any-to-any on Solana Mainnet only (password-gated; hidden on other networks) |
-| **Send** | Native (and tokens where supported) with a Rust-built preview: network, full recipient, amount, fee |
-| **Receive** | Address display and QR code |
+| **Create & import** | New seed → account name + password (no quiz). Restore with a 12/24-word phrase, a private key (Solana / Ethereum / Bitcoin WIF), or Taurvia JSON. Hardware wallet listed as coming soon |
+| **Portfolio** | All activated mainnets at once — one USD total, then native + tokens per chain, with chain-badged icons |
+| **Swap** | Same-chain first: Jupiter on Solana, 0x on Ethereum, Thorchain when Bitcoin is the source. Quotes and signatures stay in Rust; password-gated |
+| **Send / receive** | Last-used chain for the address, then the asset. Rust preview: network, full recipient, amount, fee |
 | **Activity** | Recent on-chain history |
-| **Lock screen** | Password-gated unlock, signing, and seed reveal |
+| **Lock screen** | Password-gated unlock, signing, and seed reveal (seed reveal is hidden for key-only wallets) |
 
 ## Security
 
@@ -48,7 +48,7 @@ Taurvia is designed so the frontend never becomes a secret keeper.
 ```mermaid
 flowchart TB
   UI["React UI<br/>apps/desktop<br/><i>balances · forms · QR</i><br/><b>no private keys</b>"]
-  WC["wallet-core<br/><i>unlock · sign · send</i>"]
+  WC["wallet-core<br/><i>unlock · sign · send · swap</i>"]
   CRYPTO["crypto<br/>Argon2id · AES-256-GCM"]
   REG["taurvia-chain<br/>descriptors · prices"]
   SOL["taurvia-solana"]
@@ -65,9 +65,10 @@ flowchart TB
   REG --> BTC
 ```
 
-- **At rest:** Argon2id (+ optional OS keychain device binding) + AES-256-GCM encryption — **one envelope** for the mnemonic, all families
+- **At rest:** Argon2id (+ optional OS keychain device binding) + AES-256-GCM — **one envelope** for the mnemonic or imported key
 - **In memory:** family signers only while unlocked — recovery phrase is not kept in session RAM; lock drops and zeroizes the keyring
-- **At sign time:** transactions are built and signed in Rust (Solana SDK, alloy, bitcoin crate), not JavaScript
+- **Key-only wallets:** a Solana, Ethereum, or Bitcoin key cannot derive the other curves; other chains cannot be activated; reveal seed is hidden
+- **At sign time:** transactions (including Jupiter, 0x, and Thorchain BTC sends) are built and signed in Rust, not JavaScript
 - **Wrong-chain sends:** Rust rejects `0x` on Solana, `bc1` on Ethereum, base58 on Bitcoin, etc.
 - **Seed reveal:** re-decrypts from disk with password every time
 - **Details:** see [`doc/SECURITY.md`](doc/SECURITY.md) (device protection, backup vs seed restore, multi-family session)
@@ -102,7 +103,7 @@ pnpm tauri dev
 
 ### Optional: custom RPC
 
-By default Taurvia uses a **managed public RPC for the active network** (Settings → Network). Swap is Solana Mainnet-only. For better reliability or higher rate limits:
+By default Taurvia uses a **managed public RPC** per enabled network (Settings → Network). Swap runs on each enabled mainnet that has a backend (Jupiter / 0x / Thorchain). For better reliability or higher rate limits:
 
 ```bash
 cp ../../.env.example ../../.env
@@ -110,9 +111,11 @@ cp ../../.env.example ../../.env
 # TAURVIA_ETH_RPC_URL=https://eth.llamarpc.com
 # TAURVIA_BTC_ESPLORA_URL=https://blockstream.info/api
 # TAURVIA_JUPITER_API_KEY=YOUR_PORTAL_KEY   # free at https://portal.jup.ag
+# TAURVIA_0X_API_KEY=YOUR_0X_KEY            # optional; also Settings → Advanced
 ```
 
 `TAURVIA_RPC_URL` overrides the managed Solana default. Ethereum and Bitcoin have their own env keys. Custom RPC in Settings → Advanced is still per-network.
+
 ### Build
 
 Local builds produce packages for the **host OS only**. On Linux that means `.deb`, `.rpm`, and `.AppImage`:
@@ -161,14 +164,14 @@ flowchart LR
 | `taurvia-hd` | BIP39 generate / validate / seed (no IPC) |
 | `taurvia-chain` | Registry, address-family checks, shared HTTP + prices |
 | `taurvia-solana` | Solana RPC, SPL, Jupiter swap |
-| `taurvia-evm` | alloy provider, EIP-1559, ERC-20 |
-| `taurvia-bitcoin` | BIP84 Native SegWit, Esplora |
-| `wallet-core` | Session, encrypt/decrypt, password-gated dispatch **by family** |
+| `taurvia-evm` | alloy provider, EIP-1559, ERC-20, 0x swap |
+| `taurvia-bitcoin` | BIP84 Native SegWit, Esplora, Thorchain quote + inbound send |
+| `wallet-core` | Session, encrypt/decrypt, password-gated dispatch **by family**, parallel portfolio snapshot |
 | `taurvia-desktop` | Thin Tauri shell + IPC commands |
 
 ### Derivation (compatibility, not product identity)
 
-Same BIP39 seed as Phantom / MetaMask / typical BIP84 wallets. Tests live next to the derivation code.
+Same BIP39 seed as Phantom / MetaMask / typical BIP84 wallets. Tests live next to the derivation code. A raw imported key does not use these paths.
 
 | Family | Path | Address |
 |--------|------|---------|
@@ -190,7 +193,7 @@ Signing still cannot move to JavaScript. Disabled stubs already exist for `polyg
 
 | Growth | Where it goes |
 |--------|----------------|
-| Hardware / USB cold storage | New `crates/device` or module under `wallet-core` |
+| Hardware / USB cold storage | New `crates/device` or module under `wallet-core` (import UI already shows it as coming soon) |
 | WalletConnect / dApp browser | **Out of scope** — would invert “the UI cannot bypass Rust” |
 | Explorer links | Solana: Settings (Solscan / Solana Explorer). Other families: descriptor `explorer_tx` |
 | QR scan | Prefer native/Rust on Linux (not webview WebRTC) |
@@ -208,8 +211,8 @@ taurvia/
 │   ├── taurvia-hd/            # BIP39
 │   ├── taurvia-chain/         # registry, mismatch checks, prices
 │   ├── taurvia-solana/        # RPC, transfers, Jupiter
-│   ├── taurvia-evm/           # alloy, EIP-1559, ERC-20
-│   ├── taurvia-bitcoin/       # BIP84, Esplora
+│   ├── taurvia-evm/           # alloy, EIP-1559, ERC-20, 0x
+│   ├── taurvia-bitcoin/       # BIP84, Esplora, Thorchain
 │   ├── storage/               # wallet file persistence
 │   └── wallet-core/           # session, signing, snapshots, swap
 └── doc/                       # project docs
